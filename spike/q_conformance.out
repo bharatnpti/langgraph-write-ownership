@@ -1,0 +1,250 @@
+
+==============================================================================
+0. SUITE INVENTORY (upstream main, langgraph-checkpoint-conformance 0.0.2)
+==============================================================================
+  test_put                          17 tests
+      - test_put_returns_config
+      - test_put_roundtrip
+      - test_put_preserves_channel_values
+      - test_put_preserves_channel_versions
+      - test_put_preserves_versions_seen
+      - test_put_preserves_metadata
+      - test_put_root_namespace
+      - test_put_child_namespace
+      - test_put_default_namespace
+      - test_put_multiple_checkpoints_same_thread
+      - test_put_multiple_threads_isolated
+      - test_put_parent_config
+      - test_put_incremental_channel_update
+      - test_put_new_channel_added
+      - test_put_channel_removed
+      - test_put_preserves_run_id
+      - test_put_preserves_versions_seen_values
+  test_put_writes                   10 tests
+      - test_put_writes_basic
+      - test_put_writes_multiple_writes_same_task
+      - test_put_writes_multiple_tasks
+      - test_put_writes_preserves_task_id
+      - test_put_writes_preserves_channel_and_value
+      - test_put_writes_task_path
+      - test_put_writes_idempotent
+      - test_put_writes_special_channels
+      - test_put_writes_across_namespaces
+      - test_put_writes_cleared_on_next_checkpoint
+  test_get_tuple                    10 tests
+      - test_get_tuple_nonexistent_returns_none
+      - test_get_tuple_latest_when_no_checkpoint_id
+      - test_get_tuple_specific_checkpoint_id
+      - test_get_tuple_config_structure
+      - test_get_tuple_checkpoint_fields
+      - test_get_tuple_metadata
+      - test_get_tuple_parent_config
+      - test_get_tuple_pending_writes
+      - test_get_tuple_respects_namespace
+      - test_get_tuple_nonexistent_checkpoint_id
+  test_list                         16 tests
+      - test_list_all
+      - test_list_by_thread
+      - test_list_by_namespace
+      - test_list_ordering
+      - test_list_metadata_filter_single_key
+      - test_list_metadata_filter_step
+      - test_list_metadata_filter_multiple_keys
+      - test_list_metadata_filter_no_match
+      - test_list_metadata_custom_keys
+      - test_list_before
+      - test_list_limit
+      - test_list_limit_plus_before
+      - test_list_combined_thread_and_filter
+      - test_list_empty_result
+      - test_list_includes_pending_writes
+      - test_list_multiple_namespaces
+  test_delete_thread                 5 tests
+      - test_delete_thread_removes_checkpoints
+      - test_delete_thread_removes_writes
+      - test_delete_thread_removes_all_namespaces
+      - test_delete_thread_preserves_other_threads
+      - test_delete_thread_nonexistent_noop
+  test_delete_for_runs               7 tests
+      - test_delete_for_runs_single
+      - test_delete_for_runs_multiple
+      - test_delete_for_runs_preserves_other_runs
+      - test_delete_for_runs_removes_writes
+      - test_delete_for_runs_empty_list_noop
+      - test_delete_for_runs_nonexistent_noop
+      - test_delete_for_runs_across_namespaces
+  test_copy_thread                   8 tests
+      - test_copy_thread_basic
+      - test_copy_thread_all_checkpoints
+      - test_copy_thread_preserves_metadata
+      - test_copy_thread_preserves_namespaces
+      - test_copy_thread_preserves_writes
+      - test_copy_thread_preserves_ordering
+      - test_copy_thread_source_unchanged
+      - test_copy_thread_nonexistent_source
+  test_prune                         8 tests
+      - test_prune_keep_latest_single_thread
+      - test_prune_keep_latest_multiple_threads
+      - test_prune_keep_latest_across_namespaces
+      - test_prune_keep_latest_preserves_writes
+      - test_prune_delete_all
+      - test_prune_preserves_other_threads
+      - test_prune_empty_list_noop
+      - test_prune_nonexistent_noop
+  test_delta_channel_history         8 tests
+      - test_history_returns_writes_oldest_first
+      - test_history_seed_is_nearest_snapshot
+      - test_history_excludes_target_pending_writes
+      - test_history_multi_channel
+      - test_history_empty_channels_returns_empty
+      - test_history_walk_to_root_no_seed
+      - test_history_migration_plain_value_as_seed
+      - test_history_seed_ancestor_own_writes_are_replayed
+
+  TOTAL CONTRACT CLAUSES (test functions): 89
+  spec runners exported: 9
+  BASE capabilities:     ['delete_thread', 'get_tuple', 'list', 'put', 'put_writes']
+  ALL capabilities:      ['copy_thread', 'delete_for_runs', 'delete_thread', 'delta_channel_history', 'get_tuple', 'list', 'prune', 'put', 'put_writes']
+
+==============================================================================
+1. InMemorySaver (reproduces libs/checkpoint-conformance/tests/test_validate_memory.py)
+==============================================================================
+  put: .................
+  put_writes: ..........
+  get_tuple: ..........
+  list: ................
+  delete_thread: .....
+  ⊘ delete_for_runs (not implemented)
+  ⊘ copy_thread (not implemented)
+  ⊘ prune (not implemented)
+  delta_channel_history: ........
+
+  ====================================================
+    Checkpointer Validation: InMemorySaver
+  ====================================================
+    BASE CAPABILITIES
+      ✅ delete_thread        
+      ✅ get_tuple            
+      ✅ list                 
+      ✅ put                  
+      ✅ put_writes           
+
+    EXTENDED CAPABILITIES
+      ⊘  copy_thread          (not implemented)
+      ⊘  delete_for_runs      (not implemented)
+      ✅ delta_channel_history 
+      ⊘  prune                (not implemented)
+
+    Result: FULL (6/6)
+  ====================================================
+
+  passed_all_base() = True
+  conformance_level = FULL
+
+==============================================================================
+2. AsyncPostgresSaver (langgraph-checkpoint-postgres 3.1.2)
+==============================================================================
+  db: postgresql://postgres:@/conf_lane_pg?host=spike/pgdata
+  put: .................
+  put_writes: ..........
+  get_tuple: ..........
+  list: ................
+  delete_thread: .....
+  ⊘ delete_for_runs (not implemented)
+  ⊘ copy_thread (not implemented)
+  ⊘ prune (not implemented)
+  delta_channel_history: ........
+
+  ====================================================
+    Checkpointer Validation: AsyncPostgresSaver
+  ====================================================
+    BASE CAPABILITIES
+      ✅ delete_thread        
+      ✅ get_tuple            
+      ✅ list                 
+      ✅ put                  
+      ✅ put_writes           
+
+    EXTENDED CAPABILITIES
+      ⊘  copy_thread          (not implemented)
+      ⊘  delete_for_runs      (not implemented)
+      ✅ delta_channel_history 
+      ⊘  prune                (not implemented)
+
+    Result: FULL (6/6)
+  ====================================================
+
+  passed_all_base() = True
+  conformance_level = FULL
+
+==============================================================================
+3. FenceHostileSaver -- no ownership semantics at all
+==============================================================================
+  put: .................
+  put_writes: ..........
+  get_tuple: ..........
+  list: ................
+  delete_thread: .....
+  ⊘ delete_for_runs (not implemented)
+  ⊘ copy_thread (not implemented)
+  ⊘ prune (not implemented)
+  delta_channel_history: ........
+
+  ====================================================
+    Checkpointer Validation: FenceHostileSaver
+  ====================================================
+    BASE CAPABILITIES
+      ✅ delete_thread        
+      ✅ get_tuple            
+      ✅ list                 
+      ✅ put                  
+      ✅ put_writes           
+
+    EXTENDED CAPABILITIES
+      ⊘  copy_thread          (not implemented)
+      ⊘  delete_for_runs      (not implemented)
+      ✅ delta_channel_history 
+      ⊘  prune                (not implemented)
+
+    Result: FULL (6/6)
+  ====================================================
+
+  passed_all_base() = True
+  conformance_level = FULL
+  --> If BASE passes, the suite provably cannot detect the absence
+      of run-ownership / fencing.
+
+==============================================================================
+3b. The hazard the suite has no clause for: two workers, one thread
+==============================================================================
+  distinct writers on thread: ['anonymous', 'worker-A-LIVE', 'worker-B-ZOMBIE']
+  writes accepted after a 2nd writer appeared: 3
+  latest checkpoint id: 1f1a3dfb-b095-66e6-bfff-8258de61006f
+  pending_writes now:   [('3523557d-bb47-4022-8902-fffd2b619226', 'ch', 'B-work')]
+  Both workers' state coexists. NO conformance clause forbids this,
+  and no error type exists for the saver to signal a refusal.
+
+==============================================================================
+3c. Is there an error type the runtime treats specially?
+==============================================================================
+  langgraph.errors.__all__ = ('EmptyChannelError', 'ErrorCode', 'GraphDrained', 'GraphRecursionError', 'InvalidUpdateError', 'GraphBubbleUp', 'GraphInterrupt', 'NodeCancelledError', 'NodeError', 'NodeInterrupt', 'NodeTimeoutError', 'ParentCommand', 'EmptyInputError', 'TaskNotFound')
+    CheckpointNotLatest  present=False
+    CheckpointRejected   present=False
+    FencedOut            present=False
+    OwnershipLost        present=False
+    StaleWrite           present=False
+    WriteRejected        present=False
+
+  BaseCheckpointSaver.aput return annotation:
+    {'config': 'RunnableConfig', 'checkpoint': 'Checkpoint', 'metadata': 'CheckpointMetadata', 'new_versions': 'ChannelVersions', 'return': 'RunnableConfig'}
+  BaseCheckpointSaver.aput_writes return annotation:
+    {'config': 'RunnableConfig', 'writes': 'Sequence[tuple[str, Any]]', 'task_id': 'str', 'task_path': 'str', 'return': 'None'}
+
+==============================================================================
+4. Does a saver that REFUSES a write propagate through Pregel?
+==============================================================================
+  raised: builtins.PermissionError: FENCED OUT: run reassigned to another worker
+  --> a saver refusal propagates as a raw exception; there is no
+      typed rejection the runtime treats specially.
+  aput call count: 4
+  state after refusal: next=() values={'steps': []}

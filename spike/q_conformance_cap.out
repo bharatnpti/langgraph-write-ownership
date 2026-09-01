@@ -1,0 +1,21 @@
+
+==============================================================================
+5. Extended-capability detection: does the method need to exist on BaseCheckpointSaver?
+==============================================================================
+  BaseCheckpointSaver has aput                         -> True
+  BaseCheckpointSaver has aput_writes                  -> True
+  BaseCheckpointSaver has aget_tuple                   -> True
+  BaseCheckpointSaver has alist                        -> True
+  BaseCheckpointSaver has adelete_thread               -> True
+  BaseCheckpointSaver has adelete_for_runs             -> True
+  BaseCheckpointSaver has acopy_thread                 -> True
+  BaseCheckpointSaver has aprune                       -> True
+  BaseCheckpointSaver has aget_delta_channel_history   -> True
+
+  A hypothetical NEW capability method NOT on the base class:
+    _is_overridden(SaverWithNovelMethod, 'aput_writes_fenced') = True
+    _is_overridden(InMemorySaver,        'aput_writes_fenced') = False
+
+  DetectedCapabilities on a plain InMemorySaver:
+    detected = ['delete_thread', 'delta_channel_history', 'get_tuple', 'list', 'put', 'put_writes']
+    missing  = ['copy_thread', 'delete_for_runs', 'prune']

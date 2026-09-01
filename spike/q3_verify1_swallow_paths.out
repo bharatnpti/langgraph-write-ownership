@@ -1,0 +1,1135 @@
+Q3 ADVERSARIAL VERIFY 1 -- lens: SWALLOWING AND RETRIES
+langgraph = n/a
+db = q3v1_swallow  run tag = e380d7aa
+
+==============================================================================
+S0. SOURCE ENUMERATION -- every site that can drop a saver-write exc
+==============================================================================
+SOURCE: pregel/_loop.py:1697  self.submit = stack.enter_context(BackgroundExecutor(config));
+        then stack.push(self._suppress_interrupt).  ExitStack unwinds LIFO, so
+        _suppress_interrupt runs FIRST and BackgroundExecutor.__exit__ LAST.
+SOURCE: pregel/_executor.py:105-118  BackgroundExecutor.__exit__:
+          concurrent.futures.wait(pending); stack.__exit__(...);
+          `if exc_type is None:` -> only then loop over tasks and task.result()
+        => DROP SITE #1 (sync): any exception raised by a background saver write
+           is discarded whenever ANY exception is already propagating.
+SOURCE: pregel/_executor.py:190-205  AsyncBackgroundExecutor.__aexit__: same
+        `if exc_type is None:` guard, after `await asyncio.wait(tasks)`.
+        => DROP SITE #2 (async), and it re-raises only the FIRST failed task
+           in dict (submission) order -- no ExceptionGroup, siblings dropped.
+SOURCE: pregel/_executor.py:77-86  BackgroundExecutor.done(): calls task.result()
+        inside `except BaseException: pass` -- so a failed write task is silenced
+        at completion time and NOT logged; it is only retained in self.tasks.
+        => DROP SITE #3: nothing ever logs the sync-side rejection.
+SOURCE: pregel/_executor.py:57-59 / 143-146  submit(__reraise_on_exit__): saver
+        writes are submitted with the default True; only NODE futures use False
+        (_runner.py:774, :926). So reraise=False is NOT a saver drop site.
+SOURCE: pregel/_loop.py:466  `if self.durability != 'exit' and put_writes is not None:`
+        => DROP SITE #4: durability='exit' never calls put_writes at all,
+           so a fence implemented only in put_writes is never consulted.
+SOURCE: pregel/_loop.py:1324-1334  _suppress_interrupt: under durability='exit'
+        it calls _put_exit_delta_writes/_put_checkpoint/_put_pending_writes
+        EVEN WHEN exc_value is not None -- and those submits land in the same
+        BackgroundExecutor that is about to be exited with exc_type != None.
+        => DROP SITE #5: durability='exit' + any error == silent rejection.
+SOURCE: pregel/_loop.py:1336-1373  _suppress_interrupt returns True for a
+        top-level GraphInterrupt. ExitStack then passes (None,None,None) to the
+        outer BackgroundExecutor.__exit__, so a pending rejection DOES surface
+        on the interrupt path. (anti-drop site)
+SOURCE: pregel/_loop.py:1529-1546 / 1783-1801  _checkpointer_put_after_previous:
+        `try: prev.result() finally: put(...)` -- the finally means a rejected
+        put does NOT stop the next put from being attempted, and the prev
+        exception can be REPLACED by the later put's exception.
+SOURCE: pregel/_loop.py:1571-1573 / 1830-1836  schedule_error_handler waits on
+        _error_handler_write_futs with concurrent.futures.wait / asyncio.gather.
+        concurrent.futures.wait NEVER raises => sync error-handler path defers
+        the rejection to loop exit; asyncio.gather DOES raise.
+SOURCE: pregel/main.py:2985-2986 / 3461-3462  `if durability_=='sync':
+        loop._put_checkpoint_fut.result()` -- the ONLY place a put future is
+        actively awaited mid-run. put_writes futures are never awaited.
+SOURCE: pregel/main.py:3013-3015 / 3492-3494 GraphRecursionError / GraphDrained
+        are raised AFTER the `with loop` block, i.e. after the executor exit,
+        so a pending rejection wins over them (anti-drop site).
+SOURCE: checkpoint/postgres/__init__.py  _cursor(): no retry, no reconnect loop,
+        no resend. Nothing in langgraph/pregel retries a saver write.
+
+==============================================================================
+S1. DROP SITE #1/#2: is the `if exc_type is None` race STRUCTURAL?
+==============================================================================
+Same race in every durability x trap x sync/async combination.
+Graph: n1 -> {good, bad} in ONE superstep; good's write is rejected while
+bad is still running; bad then raises NodeBoom.
+
+--- CASE s1-sync-sync-put_writes  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=a770c8bb,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=6bc4058c,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)
+    put_writes(task=9340c8ce,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=dd413f3f,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=9340c8ce,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-sync-sync-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-sync-sync-put  (durability=sync, trap=put, mode=invoke)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=d87d70e3,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)  <-- REJECTED
+  OBSERVED: rejections=2 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=0,src=loop'
+  OBSERVED: exception chain = ['__main__.StaleOwner', '__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = []
+  VERDICT[s1-sync-sync-put] = SURFACED 
+
+--- CASE s1-sync-async-put_writes  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=c1d7bffd,chans=['log', 'branch:to:n1'])
+    put_writes(task=3e9156e0,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put_writes(task=fd608564,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put_writes(task=12839a95,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=fd608564,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-sync-async-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-sync-async-put  (durability=async, trap=put, mode=invoke)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=e4894b24,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)  <-- REJECTED
+    put_writes(task=dd6c3c50,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=3e93bea6,chans=['log', 'branch:to:join'])
+    put_writes(task=d0b2d18c,chans=['__error__'])
+  OBSERVED: rejections=3 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)', 'put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-sync-async-put] = DROPPED-SILENT 
+
+--- CASE s1-sync-exit-put_writes  (durability=exit, trap=put_writes, mode=invoke)
+    put(step=1,src=loop)
+    put_writes(task=ff6ffa46,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=317acace,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=ff6ffa46,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-sync-exit-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-sync-exit-put  (durability=exit, trap=put, mode=invoke)
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=fc4dd22a,chans=['log', 'branch:to:join'])
+    put_writes(task=7d57517e,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-sync-exit-put] = DROPPED-SILENT 
+
+--- CASE s1-async-sync-put_writes  (durability=sync, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=a3a5f52d,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=a249cf87,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)
+    put_writes(task=a5a10612,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=0f88c30d,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=a5a10612,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-async-sync-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-async-sync-put  (durability=sync, trap=put, mode=ainvoke)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=75c8c278,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)  <-- REJECTED
+  OBSERVED: rejections=2 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=0,src=loop'
+  OBSERVED: exception chain = ['__main__.StaleOwner', '__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = []
+  VERDICT[s1-async-sync-put] = SURFACED 
+
+--- CASE s1-async-async-put_writes  (durability=async, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=bb4c4216,chans=['log', 'branch:to:n1'])
+    put_writes(task=d9edd49d,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put_writes(task=c377ebd5,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put_writes(task=28e53f51,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=c377ebd5,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-async-async-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-async-async-put  (durability=async, trap=put, mode=ainvoke)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=2be6759b,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)  <-- REJECTED
+    put_writes(task=71b2f0b7,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=26fe6012,chans=['log', 'branch:to:join'])
+    put_writes(task=d9e5dba6,chans=['__error__'])
+  OBSERVED: rejections=3 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)', 'put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-async-async-put] = DROPPED-SILENT 
+
+--- CASE s1-async-exit-put_writes  (durability=exit, trap=put_writes, mode=ainvoke)
+    put(step=1,src=loop)
+    put_writes(task=d70208ca,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=e0d0d7e7,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=d70208ca,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-async-exit-put_writes] = DROPPED-SILENT 
+
+--- CASE s1-async-exit-put  (durability=exit, trap=put, mode=ainvoke)
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=4afc1363,chans=['log', 'branch:to:join'])
+    put_writes(task=90c435eb,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1-async-exit-put] = DROPPED-SILENT 
+
+==============================================================================
+S1b. control: the SAME race but with interrupt() instead of a node error
+==============================================================================
+_suppress_interrupt returns True for a top-level GraphInterrupt, which makes
+ExitStack hand (None,None,None) to BackgroundExecutor.__exit__.
+
+--- CASE s1b-interrupt-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=662b6b55,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=8bfa5e31,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)
+    put_writes(task=6e4e1a75,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=3e43524a,chans=['__interrupt__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=6e4e1a75,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=6e4e1a75,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1b-interrupt-sync] = SURFACED (interrupt, not error)
+
+--- CASE s1b-interrupt-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=4854f81d,chans=['log', 'branch:to:n1'])
+    put_writes(task=dcde6b0f,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put_writes(task=6a15ff6f,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put_writes(task=b886b0d6,chans=['__interrupt__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=6a15ff6f,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=6a15ff6f,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s1b-interrupt-async] = SURFACED (interrupt, not error)
+
+==============================================================================
+S2. DROP SITE #5: durability='exit' + node error -> the exit put is dropped
+==============================================================================
+Under durability='exit' the ONLY saver write happens inside
+_suppress_interrupt, which runs while the node error is still propagating.
+
+--- CASE s2-exit-put-nodeerror  (durability=exit, trap=put, mode=invoke)
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=3196b4ea,chans=['__error__'])
+    put_writes(task=75750bc8,chans=['log', 'branch:to:join'])
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'bad', 'good']
+  VERDICT[s2-exit-put-nodeerror] = DROPPED-SILENT 
+
+==============================================================================
+S3. SIBLING REPLACEMENT / ExceptionGroup on the async + sync paths
+==============================================================================
+Two background writes fail in the SAME superstep with DIFFERENT exceptions.
+Which one reaches the caller? Is it an ExceptionGroup?
+
+--- CASE s3-stale1st-sync-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=a67aa909,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=b18e1575,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put(step=1,src=loop)
+    put_writes(task=0b7f6616,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=b0253778,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=2,src=loop)
+    put_writes(task=e52b0ce4,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = False
+  OBSERVED: rejections=2 rejected=["put_writes(task=0b7f6616,chans=['log', 'branch:to:join'])", "put_writes(task=b0253778,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=0b7f6616,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale1st-sync-sync] = SURFACED rejection order: stale1st
+
+--- CASE s3-stale1st-sync-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=23713140,chans=['log', 'branch:to:n1'])
+    put_writes(task=1b2d3696,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put_writes(task=0e941752,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=4770cfcf,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=75a5ea7f,chans=['log'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = False
+  OBSERVED: rejections=2 rejected=["put_writes(task=0e941752,chans=['log', 'branch:to:join'])", "put_writes(task=4770cfcf,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=0e941752,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale1st-sync-async] = SURFACED rejection order: stale1st
+
+--- CASE s3-stale1st-async-sync  (durability=sync, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=072e9c14,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=f3befad9,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put(step=1,src=loop)
+    put_writes(task=7d372fef,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=7a03ae4c,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=2,src=loop)
+    put_writes(task=80878909,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = False
+  OBSERVED: rejections=2 rejected=["put_writes(task=7d372fef,chans=['log', 'branch:to:join'])", "put_writes(task=7a03ae4c,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=7d372fef,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale1st-async-sync] = SURFACED rejection order: stale1st
+
+--- CASE s3-stale1st-async-async  (durability=async, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=a751ee21,chans=['log', 'branch:to:n1'])
+    put_writes(task=1611ff1a,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put_writes(task=7393fdae,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=002abbf9,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=1ebeabb2,chans=['log'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = False
+  OBSERVED: rejections=2 rejected=["put_writes(task=7393fdae,chans=['log', 'branch:to:join'])", "put_writes(task=002abbf9,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=7393fdae,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale1st-async-async] = SURFACED rejection order: stale1st
+
+--- CASE s3-stale2nd-sync-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=26d4070b,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=32da9f72,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put(step=1,src=loop)
+    put_writes(task=bcc8877d,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=a1e52330,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=2,src=loop)
+    put_writes(task=cad73981,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = True
+  OBSERVED: rejections=2 rejected=["put_writes(task=bcc8877d,chans=['log', 'branch:to:join'])", "put_writes(task=a1e52330,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = SiblingBoom: "unrelated background failure: put_writes task=bcc8877d,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.SiblingBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale2nd-sync-sync] = DROPPED-SILENT rejection order: stale2nd
+
+--- CASE s3-stale2nd-sync-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=2f4d084e,chans=['log', 'branch:to:n1'])
+    put_writes(task=3abfc6c0,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put(step=0,src=loop)
+    put_writes(task=b9b22eba,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=ab204258,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=7dbe181f,chans=['log'])
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = True
+  OBSERVED: rejections=2 rejected=["put_writes(task=b9b22eba,chans=['log', 'branch:to:join'])", "put_writes(task=ab204258,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = SiblingBoom: "unrelated background failure: put_writes task=b9b22eba,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.SiblingBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale2nd-sync-async] = DROPPED-SILENT rejection order: stale2nd
+
+--- CASE s3-stale2nd-async-sync  (durability=sync, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=bee0c1f0,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=0933303e,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put(step=1,src=loop)
+    put_writes(task=6b1f33a0,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=ff897aec,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=2,src=loop)
+    put_writes(task=2711c44a,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = True
+  OBSERVED: rejections=2 rejected=["put_writes(task=6b1f33a0,chans=['log', 'branch:to:join'])", "put_writes(task=ff897aec,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = SiblingBoom: "unrelated background failure: put_writes task=6b1f33a0,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.SiblingBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale2nd-async-sync] = DROPPED-SILENT rejection order: stale2nd
+
+--- CASE s3-stale2nd-async-async  (durability=async, trap=put_writes, mode=ainvoke)
+    put(step=-1,src=input)
+    put_writes(task=efe41bcf,chans=['log', 'branch:to:n1'])
+    put_writes(task=a7dd7331,chans=['log', 'branch:to:good', 'branch:to:other'])
+    put_writes(task=d0f86c75,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=d56bb8df,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=9f9fe077,chans=['log'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: is ExceptionGroup = False
+  OBSERVED: SiblingBoom in chain = True
+  OBSERVED: rejections=2 rejected=["put_writes(task=d0f86c75,chans=['log', 'branch:to:join'])", "put_writes(task=d56bb8df,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = SiblingBoom: "unrelated background failure: put_writes task=d0f86c75,chans=['log', 'branch:to:join']"
+  OBSERVED: exception chain = ['__main__.SiblingBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'other', 'join']
+  VERDICT[s3-stale2nd-async-async] = DROPPED-SILENT rejection order: stale2nd
+
+==============================================================================
+S4. RETRIES / RESENDS: does anything call the same saver write twice?
+==============================================================================
+once=True: the trap rejects the FIRST matching write and allows everything
+afterwards. If any layer retried, we would see a 2nd call for the same key.
+
+--- CASE s4-once-pw-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=fc276798,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=0d8d32e1,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+    put_writes(task=dd888193,chans=['log', 'branch:to:n3'])
+    put(step=2,src=loop)
+    put_writes(task=61934fef,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: per-(method,key) call counts = {'put:1f1a3e05-b833-6966-bfff-76d909595fa1': 1, 'pw:fc276798-0401-7f0f-f076-d254a22c38ae': 1, 'put:1f1a3e05-b835-6b9e-8000-acf4caf8499a': 1, 'pw:0d8d32e1-f982-71cb-38cf-4b61936b905d': 1, 'put:1f1a3e05-b83c-67b4-8001-4a2a21dfb16a': 1, 'pw:dd888193-6855-b252-ff24-b54cf2682ca5': 1, 'put:1f1a3e05-b83e-69ec-8002-465fd3179104': 1, 'pw:61934fef-1f17-944b-01ca-dfd089ca71a1': 1, 'put:1f1a3e05-b841-664c-8003-8ca5cf0d2df9': 1}
+  OBSERVED: keys called more than once = NONE
+  OBSERVED: rejections=1 rejected=["put_writes(task=0d8d32e1,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=0d8d32e1,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'n2', 'n3']
+  VERDICT[s4-once-pw-sync] = SURFACED dupes={}
+
+--- CASE s4-once-pw-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=49ccf798,chans=['log', 'branch:to:n1'])
+    put_writes(task=b5a75def,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put_writes(task=060632b4,chans=['log', 'branch:to:n3'])
+    put(step=0,src=loop)
+    put_writes(task=f0f16fb7,chans=['log'])
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: per-(method,key) call counts = {'put:1f1a3e05-b84f-64c2-bfff-975c198b9dd3': 1, 'pw:49ccf798-bd03-5a44-d534-4bde07b51d94': 1, 'pw:b5a75def-c461-99c8-7477-48985aae2224': 1, 'pw:060632b4-b3dd-22d8-179c-4dbb4632810e': 1, 'put:1f1a3e05-b850-63c2-8000-132fe5589b3d': 1, 'pw:f0f16fb7-c41e-4127-15ae-238e92926efe': 1, 'put:1f1a3e05-b851-63f8-8001-092f6d434f73': 1, 'put:1f1a3e05-b851-6e02-8002-223761e21825': 1, 'put:1f1a3e05-b852-67b2-8003-1b348e3f84fe': 1}
+  OBSERVED: keys called more than once = NONE
+  OBSERVED: rejections=1 rejected=["put_writes(task=b5a75def,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=b5a75def,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'n2', 'n3']
+  VERDICT[s4-once-pw-async] = SURFACED dupes={}
+
+--- CASE s4-operationalerror  (durability=sync, trap=put, mode=invoke)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=29ddbacd,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+  OBSERVED: per-(method,key) call counts = {'put:1f1a3e05-b860-6cc2-bfff-d540f3309356': 1, 'pw:29ddbacd-97d7-bd62-d554-12db7d3011af': 1, 'put:1f1a3e05-b861-6992-8000-92696d914644': 1}
+  OBSERVED: caller got OperationalError: 'connection lost during put step=-1,src=input'
+  OBSERVED: any key called twice = {}
+
+==============================================================================
+S5. CANCELLATION with a rejection pending
+==============================================================================
+
+--- CASE s5-keyboardinterrupt-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=d3e43355,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=fc6bfbcf,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)
+    put_writes(task=3134ee26,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put_writes(task=27d5e347,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=3134ee26,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = KeyboardInterrupt: ''
+  OBSERVED: exception chain = ['builtins.KeyboardInterrupt']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s5-keyboardinterrupt-sync] = DROPPED-SILENT 
+
+--- CASE s5-keyboardinterrupt-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=05cb7032,chans=['log', 'branch:to:n1'])
+    put_writes(task=dab0851d,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put_writes(task=f11757f8,chans=['log', 'branch:to:join'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put_writes(task=733eab90,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=["put_writes(task=f11757f8,chans=['log', 'branch:to:join'])"]
+  OBSERVED: caller exception = KeyboardInterrupt: ''
+  OBSERVED: exception chain = ['builtins.KeyboardInterrupt']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s5-keyboardinterrupt-async] = DROPPED-SILENT 
+
+--- CASE s5-asyncio-cancel-sync  (durability=sync, trap=put_writes, mode=cancel)
+    put(step=-1,src=input)
+    put_writes(task=8fa55646,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=82292381,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+    put_writes(task=bfd5fbb4,chans=['log', 'branch:to:n3'])
+    put(step=2,src=loop)
+    put_writes(task=49589cca,chans=['log'])
+    put(step=3,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=82292381,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=82292381,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'n2', 'n3']
+  VERDICT[s5-asyncio-cancel-sync] = SURFACED 
+
+--- CASE s5-asyncio-cancel-async  (durability=async, trap=put_writes, mode=cancel)
+    put(step=-1,src=input)
+    put_writes(task=65cd016c,chans=['log', 'branch:to:n1'])
+    put_writes(task=16a0a54b,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put_writes(task=eea388ab,chans=['log', 'branch:to:n3'])
+    put_writes(task=c9d568ef,chans=['log'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put(step=3,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=16a0a54b,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=16a0a54b,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'n2', 'n3']
+  VERDICT[s5-asyncio-cancel-async] = SURFACED 
+
+--- CASE s5-graphdrained-sync  (durability=sync, trap=put_writes)
+    put(step=-1,src=input)
+    put_writes(task=223134e9,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=9779df8c,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: GraphDrained seen = False
+  OBSERVED: rejections=1 rejected=["put_writes(task=9779df8c,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=9779df8c,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s5-graphdrained-sync] = SURFACED drain requested
+
+--- CASE s5-graphdrained-async  (durability=async, trap=put_writes)
+    put(step=-1,src=input)
+    put_writes(task=5b2d4959,chans=['log', 'branch:to:n1'])
+    put_writes(task=91e1bd86,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: GraphDrained seen = False
+  OBSERVED: rejections=1 rejected=["put_writes(task=91e1bd86,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=91e1bd86,chans=['log', 'branch:to:n2']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s5-graphdrained-async] = SURFACED drain requested
+
+==============================================================================
+S6. ABANDONED GENERATOR (GeneratorExit at the yield inside `with loop`)
+==============================================================================
+A caller that breaks out of `for chunk in graph.stream(...)` throws
+GeneratorExit into the generator, so the loop exits with exc_type != None.
+
+--- CASE s6-abandon-sync-sync  (durability=sync, trap=put_writes, mode=abandon)
+  OBSERVED: abandoned the generator after 1 chunk(s)
+    put(step=-1,src=input)
+    put_writes(task=b69bf32a,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=e0a662dd,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=e0a662dd,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s6-abandon-sync-sync] = DROPPED-SILENT stream abandoned
+
+--- CASE s6-abandon-sync-async  (durability=async, trap=put_writes, mode=abandon)
+  OBSERVED: abandoned the generator after 1 chunk(s)
+    put(step=-1,src=input)
+    put_writes(task=2251e534,chans=['log', 'branch:to:n1'])
+    put_writes(task=7c625f26,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=7c625f26,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s6-abandon-sync-async] = DROPPED-SILENT stream abandoned
+
+--- CASE s6-abandon-async-sync  (durability=sync, trap=put_writes, mode=abandon)
+  OBSERVED: abandoned the async generator after 1 chunk(s)
+    put(step=-1,src=input)
+    put_writes(task=8d17c63a,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=1d447661,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=1d447661,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s6-abandon-async-sync] = DROPPED-SILENT astream abandoned
+
+--- CASE s6-abandon-async-async  (durability=async, trap=put_writes, mode=abandon)
+  OBSERVED: abandoned the async generator after 1 chunk(s)
+    put(step=-1,src=input)
+    put_writes(task=a40b9b47,chans=['log', 'branch:to:n1'])
+    put_writes(task=bb1e5890,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=bb1e5890,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s6-abandon-async-async] = DROPPED-SILENT astream abandoned
+
+==============================================================================
+S7. _error_handler_write_futs -- the concurrent.futures.wait path
+==============================================================================
+A node with error_handler=... makes commit() append ERROR_SOURCE_NODE writes
+and collect their futures; schedule_error_handler then WAITS on them
+(concurrent.futures.wait, which never raises) before running the handler.
+
+--- CASE s7-errhandler-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=e23e5e16,chans=['log', 'branch:to:failing'])
+    put(step=0,src=loop)
+    put_writes(task=3de33fdd,chans=['__error__', '__error_source_node__'])  <-- REJECTED
+    put_writes(task=66cbd8ea,chans=['log'])
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=3de33fdd,chans=['__error__', '__error_source_node__'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=3de33fdd,chans=['__error__', '__error_source_node__']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['failing', 'handler']
+  VERDICT[s7-errhandler-sync] = SURFACED error-handler node ran
+
+--- CASE s7-errhandler-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=02ef87c8,chans=['log', 'branch:to:failing'])
+    put_writes(task=3732e785,chans=['__error__', '__error_source_node__'])  <-- REJECTED
+    put_writes(task=bb1d63dd,chans=['log'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=3732e785,chans=['__error__', '__error_source_node__'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=3732e785,chans=['__error__', '__error_source_node__']"
+  OBSERVED: exception chain = ['__main__.StaleOwner', '__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['failing', 'handler']
+  VERDICT[s7-errhandler-async] = SURFACED error-handler node ran
+
+==============================================================================
+S8. SUBGRAPH: fence fires inside a subgraph's checkpoint_ns
+==============================================================================
+
+--- CASE s8-subgraph-sync-put_writes  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=ce264409,chans=['log', 'branch:to:o1'])
+    put(step=0,src=loop)
+    put_writes(task=a9d844de,chans=['log', 'branch:to:sub'])
+    put(step=1,src=loop)
+    put(step=-1,src=input)
+    put_writes(task=43e53cc9,chans=['log', 'branch:to:i1'])  <-- REJECTED
+    put(step=0,src=loop)
+    put_writes(task=090c8ec4,chans=['log', 'branch:to:i2'])  <-- REJECTED
+    put(step=1,src=loop)
+    put_writes(task=f9f0eeee,chans=['log'])  <-- REJECTED
+    put(step=2,src=loop)
+    put_writes(task=63d2e5f6,chans=['__error__'])
+  OBSERVED: rejections=3 rejected=["put_writes(task=43e53cc9,chans=['log', 'branch:to:i1'])", "put_writes(task=090c8ec4,chans=['log', 'branch:to:i2'])", "put_writes(task=f9f0eeee,chans=['log'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=43e53cc9,chans=['log', 'branch:to:i1']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'i2']
+  VERDICT[s8-subgraph-sync-put_writes] = SURFACED rejected only inside subgraph ns
+
+--- CASE s8-subgraph-sync-put  (durability=sync, trap=put, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=87906c24,chans=['log', 'branch:to:o1'])
+    put(step=0,src=loop)
+    put_writes(task=5257485c,chans=['log', 'branch:to:sub'])
+    put(step=1,src=loop)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=ac041378,chans=['log', 'branch:to:i1'])
+    put(step=0,src=loop)  <-- REJECTED
+    put_writes(task=3e265417,chans=['__error__'])
+  OBSERVED: rejections=2 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=0,src=loop'
+  OBSERVED: exception chain = ['__main__.StaleOwner', '__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1']
+  VERDICT[s8-subgraph-sync-put] = SURFACED rejected only inside subgraph ns
+
+--- CASE s8-subgraph-async-put_writes  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=b13f5bda,chans=['log', 'branch:to:o1'])
+    put_writes(task=1624d425,chans=['log', 'branch:to:sub'])
+    put(step=0,src=loop)
+    put(step=-1,src=input)
+    put_writes(task=986c8557,chans=['log', 'branch:to:i1'])  <-- REJECTED
+    put_writes(task=6bf0a3d4,chans=['log', 'branch:to:i2'])  <-- REJECTED
+    put_writes(task=ad06640f,chans=['log'])  <-- REJECTED
+    put(step=1,src=loop)
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put(step=2,src=loop)
+    put_writes(task=b04ac85e,chans=['__error__'])
+  OBSERVED: rejections=3 rejected=["put_writes(task=986c8557,chans=['log', 'branch:to:i1'])", "put_writes(task=6bf0a3d4,chans=['log', 'branch:to:i2'])", "put_writes(task=ad06640f,chans=['log'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=986c8557,chans=['log', 'branch:to:i1']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'i2']
+  VERDICT[s8-subgraph-async-put_writes] = SURFACED rejected only inside subgraph ns
+
+--- CASE s8-subgraph-async-put  (durability=async, trap=put, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=789d64e1,chans=['log', 'branch:to:o1'])
+    put_writes(task=ba229fb4,chans=['log', 'branch:to:sub'])
+    put(step=0,src=loop)
+    put(step=-1,src=input)  <-- REJECTED
+    put_writes(task=219c9cb1,chans=['log', 'branch:to:i1'])
+    put(step=0,src=loop)  <-- REJECTED
+    put_writes(task=3119e8c7,chans=['log', 'branch:to:i2'])
+    put(step=1,src=loop)  <-- REJECTED
+    put(step=1,src=loop)
+    put_writes(task=c1215d8e,chans=['log'])
+    put(step=2,src=loop)  <-- REJECTED
+    put_writes(task=f29437b2,chans=['__error__'])
+  OBSERVED: rejections=4 rejected=['put(step=-1,src=input)', 'put(step=0,src=loop)', 'put(step=1,src=loop)', 'put(step=2,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=-1,src=input'
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'i2']
+  VERDICT[s8-subgraph-async-put] = SURFACED rejected only inside subgraph ns
+
+--- CASE s8-subgraph-exit-put_writes  (durability=exit, trap=put_writes, mode=invoke)
+    put(step=3,src=loop)
+  OBSERVED: rejections=0 rejected=[]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'i2', 'o2']
+  VERDICT[s8-subgraph-exit-put_writes] = FENCE-NEVER-CONSULTED rejected only inside subgraph ns
+
+--- CASE s8-subgraph-exit-put  (durability=exit, trap=put, mode=invoke)
+    put(step=3,src=loop)
+  OBSERVED: rejections=0 rejected=[]
+  OBSERVED: caller exception = None: 'None'
+  OBSERVED: exception chain = []
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'i2', 'o2']
+  VERDICT[s8-subgraph-exit-put] = FENCE-NEVER-CONSULTED rejected only inside subgraph ns
+
+--- CASE s8b-subgraph-race-sync  (durability=sync, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=59dae07d,chans=['log', 'branch:to:o1'])
+    put(step=0,src=loop)
+    put_writes(task=6369c2e1,chans=['log', 'branch:to:bad', 'branch:to:sub'])
+    put(step=1,src=loop)
+    put(step=-1,src=input)
+    put_writes(task=a2e49df3,chans=['log', 'branch:to:i1'])  <-- REJECTED
+    put(step=0,src=loop)
+    put_writes(task=009072dc,chans=['log'])  <-- REJECTED
+    put(step=1,src=loop)
+    put_writes(task=dad5720a,chans=['__error__'])
+    put_writes(task=9273737a,chans=['__error__'])
+  OBSERVED: rejections=2 rejected=["put_writes(task=a2e49df3,chans=['log', 'branch:to:i1'])", "put_writes(task=009072dc,chans=['log'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=a2e49df3,chans=['log', 'branch:to:i1']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'bad']
+  VERDICT[s8b-subgraph-race-sync] = SURFACED subgraph fence + outer error
+
+--- CASE s8b-subgraph-race-async  (durability=async, trap=put_writes, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=ecfe20ab,chans=['log', 'branch:to:o1'])
+    put_writes(task=6938ba1e,chans=['log', 'branch:to:bad', 'branch:to:sub'])
+    put(step=0,src=loop)
+    put(step=-1,src=input)
+    put_writes(task=3503fb4e,chans=['log', 'branch:to:i1'])  <-- REJECTED
+    put_writes(task=34490220,chans=['log'])  <-- REJECTED
+    put(step=1,src=loop)
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+    put_writes(task=6ca99aa7,chans=['__error__'])
+    put_writes(task=fa0f8724,chans=['__error__'])
+  OBSERVED: rejections=2 rejected=["put_writes(task=3503fb4e,chans=['log', 'branch:to:i1'])", "put_writes(task=34490220,chans=['log'])"]
+  OBSERVED: caller exception = StaleOwner: "fence lost: put_writes task=3503fb4e,chans=['log', 'branch:to:i1']"
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['o1', 'i1', 'bad']
+  VERDICT[s8b-subgraph-race-async] = SURFACED subgraph fence + outer error
+
+==============================================================================
+S10. REAL mid-run cancellation (the S5 cancel above finished too fast)
+==============================================================================
+Slow trap (sleeps before raising) + slow node, so the rejection is either
+IN FLIGHT or already stored in a pending future when the cancel lands.
+
+--- CASE s10-cancel-after-reject-sync (durability=sync, trap_delay=0.0, cancel_at=0.5)
+    put(step=-1,src=input)
+    put_writes(task=cdf24294,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=e8bcadf8,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: task.cancelled() = True
+  OBSERVED: rejections=1 rejected=["put_writes(task=e8bcadf8,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = CancelledError: ''
+  OBSERVED: exception chain = ['asyncio.exceptions.CancelledError']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s10-cancel-after-reject-sync] = DROPPED-SILENT cancel_at=0.5
+
+--- CASE s10-cancel-during-reject-sync (durability=sync, trap_delay=1.0, cancel_at=0.3)
+    put(step=-1,src=input)
+    put_writes(task=c89b6947,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=5b7bd7cc,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: task.cancelled() = True
+  OBSERVED: rejections=1 rejected=["put_writes(task=5b7bd7cc,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = CancelledError: ''
+  OBSERVED: exception chain = ['asyncio.exceptions.CancelledError']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s10-cancel-during-reject-sync] = DROPPED-SILENT cancel_at=0.3
+
+--- CASE s10-cancel-after-reject-async (durability=async, trap_delay=0.0, cancel_at=0.5)
+    put(step=-1,src=input)
+    put_writes(task=b84ade31,chans=['log', 'branch:to:n1'])
+    put_writes(task=73ca1cea,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: task.cancelled() = True
+  OBSERVED: rejections=1 rejected=["put_writes(task=73ca1cea,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = CancelledError: ''
+  OBSERVED: exception chain = ['asyncio.exceptions.CancelledError']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s10-cancel-after-reject-async] = DROPPED-SILENT cancel_at=0.5
+
+--- CASE s10-cancel-during-reject-async (durability=async, trap_delay=1.0, cancel_at=0.3)
+    put(step=-1,src=input)
+    put_writes(task=4b34be57,chans=['log', 'branch:to:n1'])
+    put_writes(task=3cca7bf0,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: task.cancelled() = True
+  OBSERVED: rejections=1 rejected=["put_writes(task=3cca7bf0,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = CancelledError: ''
+  OBSERVED: exception chain = ['asyncio.exceptions.CancelledError']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s10-cancel-during-reject-async] = DROPPED-SILENT cancel_at=0.3
+
+==============================================================================
+S11. SIGINT delivered from OUTSIDE mid-run (realistic Ctrl-C / shutdown)
+==============================================================================
+
+--- CASE s11-sigint-sync (durability=sync, trap=put_writes on n1)
+    put(step=-1,src=input)
+    put_writes(task=1245a733,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=9b1fc0d8,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=9b1fc0d8,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = KeyboardInterrupt: ''
+  OBSERVED: exception chain = ['builtins.KeyboardInterrupt']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s11-sigint-sync] = DROPPED-SILENT external SIGINT during n2
+
+--- CASE s11-sigint-async (durability=async, trap=put_writes on n1)
+    put(step=-1,src=input)
+    put_writes(task=11e4e55d,chans=['log', 'branch:to:n1'])
+    put_writes(task=0e81a5e4,chans=['log', 'branch:to:n2'])  <-- REJECTED
+    put(step=0,src=loop)
+    put(step=1,src=loop)
+  OBSERVED: rejections=1 rejected=["put_writes(task=0e81a5e4,chans=['log', 'branch:to:n2'])"]
+  OBSERVED: caller exception = KeyboardInterrupt: ''
+  OBSERVED: exception chain = ['builtins.KeyboardInterrupt']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s11-sigint-async] = DROPPED-SILENT external SIGINT during n2
+
+==============================================================================
+S12. the ONE apparently-safe cell: durability='sync' + trap=put
+==============================================================================
+In S1 that cell SURFACED, but only because `predicate=always` rejected the
+very first put (step=-1) before any node ran. Re-test with the fence arming
+only at the superstep that contains the failing node, which is the real race.
+
+--- CASE s12-put-armed-late-sync  (durability=sync, trap=put, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=5f8b15f6,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=ae77f775,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put(step=1,src=loop)  <-- REJECTED
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=1,src=loop'
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s12-put-armed-late-sync] = SURFACED fence arms at the put of the FAILING superstep
+
+--- CASE s12-put-armed-late-async  (durability=async, trap=put, mode=invoke)
+    put(step=-1,src=input)
+    put_writes(task=8e92fdc5,chans=['log', 'branch:to:n1'])
+    put_writes(task=629cf112,chans=['log', 'branch:to:bad', 'branch:to:good'])
+    put_writes(task=44ce42df,chans=['log', 'branch:to:join'])
+    put(step=0,src=loop)
+    put(step=1,src=loop)  <-- REJECTED
+    put_writes(task=5ac7a45a,chans=['__error__'])
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = NodeBoom: 'node blew up'
+  OBSERVED: exception chain = ['__main__.NodeBoom']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1', 'good', 'bad']
+  VERDICT[s12-put-armed-late-async] = DROPPED-SILENT fence arms at the put of the FAILING superstep
+
+==============================================================================
+S13. is durability='sync' + fence-in-put safe against the OTHER drop sites?
+==============================================================================
+S12 showed sync+put survives a competing node error (the put future is
+awaited every tick). Now hit that same cell with abandonment and SIGINT.
+
+--- CASE s13-syncput-abandoned-stream  (durability=sync, trap=put, mode=abandon)
+    put(step=-1,src=input)
+    put_writes(task=18cd5757,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=a763fa3d,chans=['log', 'branch:to:n2'])
+    put(step=1,src=loop)  <-- REJECTED
+  OBSERVED: rejections=1 rejected=['put(step=1,src=loop)']
+  OBSERVED: caller exception = StaleOwner: 'fence lost: put step=1,src=loop'
+  OBSERVED: exception chain = ['__main__.StaleOwner']
+  OBSERVED: StaleOwner recoverable from caller's exception = True
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s13-syncput-abandoned-stream] = SURFACED caller broke out of stream
+
+--- CASE s13-syncput-sigint (durability=sync, trap=put armed from step 1)
+    put(step=-1,src=input)
+    put_writes(task=05b63de6,chans=['log', 'branch:to:n1'])
+    put(step=0,src=loop)
+    put_writes(task=8cc273af,chans=['log', 'branch:to:n2'])
+    put(step=1,src=loop)
+  OBSERVED: rejections=0 rejected=[]
+  OBSERVED: caller exception = KeyboardInterrupt: ''
+  OBSERVED: exception chain = ['builtins.KeyboardInterrupt']
+  OBSERVED: StaleOwner recoverable from caller's exception = False
+  OBSERVED: out-of-band records mentioning the rejection = NONE
+  OBSERVED: nodes that ran = ['n1']
+  VERDICT[s13-syncput-sigint] = FENCE-NEVER-CONSULTED SIGINT while the fenced put is in flight
+
+==============================================================================
+S9. SUMMARY
+==============================================================================
+case                               dur    rej  caller exc             surf  verdict
+s1-sync-sync-put_writes            sync   1    NodeBoom               False DROPPED-SILENT
+s1-sync-sync-put                   sync   2    StaleOwner             True  SURFACED
+s1-sync-async-put_writes           async  1    NodeBoom               False DROPPED-SILENT
+s1-sync-async-put                  async  3    NodeBoom               False DROPPED-SILENT
+s1-sync-exit-put_writes            exit   1    NodeBoom               False DROPPED-SILENT
+s1-sync-exit-put                   exit   1    NodeBoom               False DROPPED-SILENT
+s1-async-sync-put_writes           sync   1    NodeBoom               False DROPPED-SILENT
+s1-async-sync-put                  sync   2    StaleOwner             True  SURFACED
+s1-async-async-put_writes          async  1    NodeBoom               False DROPPED-SILENT
+s1-async-async-put                 async  3    NodeBoom               False DROPPED-SILENT
+s1-async-exit-put_writes           exit   1    NodeBoom               False DROPPED-SILENT
+s1-async-exit-put                  exit   1    NodeBoom               False DROPPED-SILENT
+s1b-interrupt-sync                 sync   1    StaleOwner             True  SURFACED
+s1b-interrupt-async                async  1    StaleOwner             True  SURFACED
+s2-exit-put-nodeerror              exit   1    NodeBoom               False DROPPED-SILENT
+s3-stale1st-sync-sync              sync   2    StaleOwner             True  SURFACED
+s3-stale1st-sync-async             async  2    StaleOwner             True  SURFACED
+s3-stale1st-async-sync             sync   2    StaleOwner             True  SURFACED
+s3-stale1st-async-async            async  2    StaleOwner             True  SURFACED
+s3-stale2nd-sync-sync              sync   2    SiblingBoom            False DROPPED-SILENT
+s3-stale2nd-sync-async             async  2    SiblingBoom            False DROPPED-SILENT
+s3-stale2nd-async-sync             sync   2    SiblingBoom            False DROPPED-SILENT
+s3-stale2nd-async-async            async  2    SiblingBoom            False DROPPED-SILENT
+s4-once-pw-sync                    sync   1    StaleOwner             True  SURFACED
+s4-once-pw-async                   async  1    StaleOwner             True  SURFACED
+s4-operationalerror                sync   1    OperationalError       True  NO-RETRY
+s5-keyboardinterrupt-sync          sync   1    KeyboardInterrupt      False DROPPED-SILENT
+s5-keyboardinterrupt-async         async  1    KeyboardInterrupt      False DROPPED-SILENT
+s5-asyncio-cancel-sync             sync   1    StaleOwner             True  SURFACED
+s5-asyncio-cancel-async            async  1    StaleOwner             True  SURFACED
+s5-graphdrained-sync               sync   1    StaleOwner             True  SURFACED
+s5-graphdrained-async              async  1    StaleOwner             True  SURFACED
+s6-abandon-sync-sync               sync   1    None                   False DROPPED-SILENT
+s6-abandon-sync-async              async  1    None                   False DROPPED-SILENT
+s6-abandon-async-sync              sync   1    None                   False DROPPED-SILENT
+s6-abandon-async-async             async  1    None                   False DROPPED-SILENT
+s7-errhandler-sync                 sync   1    StaleOwner             True  SURFACED
+s7-errhandler-async                async  1    StaleOwner             True  SURFACED
+s8-subgraph-sync-put_writes        sync   3    StaleOwner             True  SURFACED
+s8-subgraph-sync-put               sync   2    StaleOwner             True  SURFACED
+s8-subgraph-async-put_writes       async  3    StaleOwner             True  SURFACED
+s8-subgraph-async-put              async  4    StaleOwner             True  SURFACED
+s8-subgraph-exit-put_writes        exit   0    None                   False FENCE-NEVER-CONSULTED
+s8-subgraph-exit-put               exit   0    None                   False FENCE-NEVER-CONSULTED
+s8b-subgraph-race-sync             sync   2    StaleOwner             True  SURFACED
+s8b-subgraph-race-async            async  2    StaleOwner             True  SURFACED
+s10-cancel-after-reject-sync       sync   1    CancelledError         False DROPPED-SILENT
+s10-cancel-during-reject-sync      sync   1    CancelledError         False DROPPED-SILENT
+s10-cancel-after-reject-async      async  1    CancelledError         False DROPPED-SILENT
+s10-cancel-during-reject-async     async  1    CancelledError         False DROPPED-SILENT
+s11-sigint-sync                    sync   1    KeyboardInterrupt      False DROPPED-SILENT
+s11-sigint-async                   async  1    KeyboardInterrupt      False DROPPED-SILENT
+s12-put-armed-late-sync            sync   1    StaleOwner             True  SURFACED
+s12-put-armed-late-async           async  1    NodeBoom               False DROPPED-SILENT
+s13-syncput-abandoned-stream       sync   1    StaleOwner             True  SURFACED
+s13-syncput-sigint                 sync   0    KeyboardInterrupt      False FENCE-NEVER-CONSULTED
+
+OBSERVED: configurations where the rejection was NEITHER surfaced NOR
+          recorded anywhere observable: 28 / 56
+          - s1-sync-sync-put_writes (caller saw NodeBoom)
+          - s1-sync-async-put_writes (caller saw NodeBoom)
+          - s1-sync-async-put (caller saw NodeBoom)
+          - s1-sync-exit-put_writes (caller saw NodeBoom)
+          - s1-sync-exit-put (caller saw NodeBoom)
+          - s1-async-sync-put_writes (caller saw NodeBoom)
+          - s1-async-async-put_writes (caller saw NodeBoom)
+          - s1-async-async-put (caller saw NodeBoom)
+          - s1-async-exit-put_writes (caller saw NodeBoom)
+          - s1-async-exit-put (caller saw NodeBoom)
+          - s2-exit-put-nodeerror (caller saw NodeBoom)
+          - s3-stale2nd-sync-sync (caller saw SiblingBoom)
+          - s3-stale2nd-sync-async (caller saw SiblingBoom)
+          - s3-stale2nd-async-sync (caller saw SiblingBoom)
+          - s3-stale2nd-async-async (caller saw SiblingBoom)
+          - s5-keyboardinterrupt-sync (caller saw KeyboardInterrupt)
+          - s5-keyboardinterrupt-async (caller saw KeyboardInterrupt)
+          - s6-abandon-sync-sync (caller saw None)
+          - s6-abandon-sync-async (caller saw None)
+          - s6-abandon-async-sync (caller saw None)
+          - s6-abandon-async-async (caller saw None)
+          - s10-cancel-after-reject-sync (caller saw CancelledError)
+          - s10-cancel-during-reject-sync (caller saw CancelledError)
+          - s10-cancel-after-reject-async (caller saw CancelledError)
+          - s10-cancel-during-reject-async (caller saw CancelledError)
+          - s11-sigint-sync (caller saw KeyboardInterrupt)
+          - s11-sigint-async (caller saw KeyboardInterrupt)
+          - s12-put-armed-late-async (caller saw NodeBoom)
+OBSERVED: configurations where the fence was never even consulted: 3
+          - s8-subgraph-exit-put_writes
+          - s8-subgraph-exit-put
+          - s13-syncput-sigint
+
+DONE

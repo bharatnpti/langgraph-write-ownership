@@ -1,0 +1,51 @@
+WRITE_OWNERSHIP -- 15 clauses
+
+==============================================================================
+  HALF 1 -- in memory. No database, no network.
+==============================================================================
+
+  OwnedInMemorySaver
+    verdict:  PASS  (15 passed, 0 failed)
+    expected: PASS -- the reference implementation
+
+  HostileInMemorySaver
+    verdict:  FAIL  (7 passed, 8 failed)
+    expected: FAIL -- ignores supersession entirely
+      FAIL  test_superseded_owner_cannot_displace_a_special_channel_write
+      FAIL  test_superseded_owner_cannot_displace_the_current_owners_write
+      FAIL  test_superseded_owner_cannot_fork_the_chain
+      FAIL  test_superseded_owner_put_is_not_durable
+      FAIL  test_superseded_owner_put_is_rejected
+      FAIL  test_superseded_owner_put_writes_is_not_durable
+      FAIL  test_superseded_owner_put_writes_is_rejected
+      FAIL  test_superseded_owner_stays_superseded
+
+  SilentInMemorySaver
+    verdict:  FAIL  (7 passed, 8 failed)
+    expected: FAIL -- refuses durably, never says so
+      FAIL  test_superseded_owner_cannot_displace_a_special_channel_write
+      FAIL  test_superseded_owner_cannot_displace_the_current_owners_write
+      FAIL  test_superseded_owner_cannot_fork_the_chain
+      FAIL  test_superseded_owner_put_is_not_durable
+      FAIL  test_superseded_owner_put_is_rejected
+      FAIL  test_superseded_owner_put_writes_is_not_durable
+      FAIL  test_superseded_owner_put_writes_is_rejected
+      FAIL  test_superseded_owner_stays_superseded
+
+  DeferredInMemorySaver
+    verdict:  PASS  (15 passed, 0 failed)
+    expected: PASS -- refuses, reports at the barrier only
+
+  InMemorySaver (unmodified), full suite
+    write_ownership:  NOT DETECTED
+    passed_all_base:  True
+    conformance_level:FULL
+    expected:         NOT DETECTED, base intact -- extended, never base
+
+==============================================================================
+  HALF 2 -- against a real PostgreSQL 16.2.
+==============================================================================
+
+  SKIPPED: no pgserver, or spike/pgdata does not exist
+
+done.

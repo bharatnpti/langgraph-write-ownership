@@ -1,0 +1,117 @@
+THE ZOMBIE PROOF -- durable-agents Phase 1
+started TS   python 3.12.13
+pinned: langgraph==1.2.11  langgraph-checkpoint==4.2.0  langgraph-checkpoint-postgres==3.1.2  deepagents==0.7.11  langchain-core==1.6.1  psycopg==3.3.4
+postgres: 16.2   pipeline support: True
+scenario: 1 thread, 2 OS processes, deepagents react loop, durability='sync'
+
+pre-flight -- the guard's SQL, and two shapes that look right and are not
+    CASE WHEN <sub>=1 THEN 1 ELSE 1/0 END, fence MATCHES      -> DivisionByZero sqlstate=22012
+    CASE WHEN true THEN 1 ELSE 1/0 END (constant condition)   -> 1
+    1 / (select count(*)...), fence MATCHES                   -> 1
+    1 / (select count(*)...), fence STALE                     -> DivisionByZero sqlstate=22012
+  [PASS] the guard SQL returns 1 when the fence matches and raises 22012 when stale
+
+==============================================================================
+HALF A -- NEGATIVE CONTROL, FENCING OFF (the deliverable)
+==============================================================================
+  worker A (pid PID) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...CKPT
+  worker B took the thread over with invoke(None, config): ok=True fence=None
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=True error=None
+
+  Assertion 1 -- the checkpoint chain FORKS
+  [PASS] two distinct checkpoints share one parent_checkpoint_id  -- parent ...CKPT -> children ...CKPT, ...CKPT
+  [PASS] one child written by worker B, one by the thawed zombie A  -- B ...CKPT / A ...CKPT
+  [PASS] BOTH workers believe they succeeded; neither saw an error
+
+  Assertion 2 -- the consequence: the thread's message list is malformed
+    both workers ran the SAME model task at the fork parent and both wrote messages there;
+    rows actually stored: 1  task_ids=['TASK']  tool_calls=['tc_B2']
+  [PASS] the zombie's AIMessage was silently dropped at the fork parent  -- checkpoint_writes is INSERT ... ON CONFLICT DO NOTHING on a deterministic task_id, so it is first-writer-wins -- yet worker A went on to execute tool_call tc_A2 that no stored AIMessage ever offered
+    thread as read back from the tip:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_A2
+    AIMessage      final answer from A          tool_calls=- tool_call_id=-
+  [PASS] the message list read back from the thread is malformed  -- tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+         + tool_use id='tc_B2' was never answered by a tool_result
+  [PASS] worker B's committed work is no longer reachable from the tip  -- 3 checkpoints orphaned, including B's terminal checkpoint
+    worker B returned to its caller: 'final answer from B'
+    the thread's tip now says:       'final answer from A'
+
+  Assertion 3 -- is it unresumable? (measured and reported, NOT asserted)
+    .next at the tip = ()  (LangGraph thinks the run finished)
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> RuntimeError: provider would reject this request: tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+    Plainly: NOT mechanically unresumable -- LangGraph reads, replays and
+    resumes the forked thread without complaint. What is destroyed is the
+    thread's USABILITY at the next model call, durably. Shown with our own
+    validator, not a real provider's 400 (no API key here).
+
+==============================================================================
+HALF B -- FENCING ON  (pipeline path)
+==============================================================================
+  worker A (pid PID) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...CKPT
+  worker B took the thread over with invoke(None, config): ok=True fence=2
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=False error=DivisionByZero: division by zero
+    [A stderr] error ignored terminating <psycopg.Pipeline [IDLE, pipeline=ON] (user=postgres database=durable_agents_proof) at 0x10b0e5cd0>: pipeline aborted
+  [PASS] worker B claimed the run with one UPDATE whose WHERE tests the column it writes  -- fence 1 -> 2
+  [PASS] the chain did NOT fork  -- 0 forked parents
+  [PASS] the thawed zombie's writes were refused by the DATABASE  -- 0 checkpoint rows added after the takeover
+  [PASS] worker A's run terminated instead of committing  -- DivisionByZero: division by zero
+  [PASS] the refusal came from Postgres, not from a Python raise (corroboration only)  -- sqlstate=22012
+  [PASS] the fence row advanced exactly once
+  worker B's thread, read back:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_B2
+    AIMessage      final answer from B          tool_calls=- tool_call_id=-
+  [PASS] worker B's result is intact and well-formed
+  [PASS] the tip is worker B's answer  -- 'final answer from B'
+  still resumable:
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> ACCEPTED, 8 messages
+
+==============================================================================
+HALF B -- FENCING ON  (supports_pipeline forced False)
+==============================================================================
+  worker A (pid PID) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...CKPT
+  worker B took the thread over with invoke(None, config): ok=True fence=2
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=False error=DivisionByZero: division by zero
+  [PASS] worker B claimed the run with one UPDATE whose WHERE tests the column it writes  -- fence 1 -> 2
+  [PASS] the chain did NOT fork  -- 0 forked parents
+  [PASS] the thawed zombie's writes were refused by the DATABASE  -- 0 checkpoint rows added after the takeover
+  [PASS] worker A's run terminated instead of committing  -- DivisionByZero: division by zero
+  [PASS] the refusal came from Postgres, not from a Python raise (corroboration only)  -- sqlstate=22012
+  [PASS] the fence row advanced exactly once
+  worker B's thread, read back:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_B2
+    AIMessage      final answer from B          tool_calls=- tool_call_id=-
+  [PASS] worker B's result is intact and well-formed
+  [PASS] the tip is worker B's answer  -- 'final answer from B'
+  still resumable:
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> ACCEPTED, 8 messages
+
+==============================================================================
+VERDICT: PROVEN
+  OFF: two workers on one thread_id forked the checkpoint chain and left a
+       message list holding a tool_result whose tool_use is on the other
+       branch. Both workers reported success. Nothing logged a warning.
+  ON:  the same zombie's writes were refused by Postgres, the chain did not
+       fork, and the survivor's thread is intact and usable -- on both the
+       pipeline path and the supports_pipeline=False fallback.
+==============================================================================

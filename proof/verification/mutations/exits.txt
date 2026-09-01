@@ -1,0 +1,9 @@
+m1_guard_always_pass EXIT=1
+m2_claim_no_bump EXIT=1
+m3_trivial_fence_compare EXIT=1
+m4_no_unwind EXIT=1
+m5_python_raise EXIT=1
+mA_b_other_thread EXIT=1
+mA_no_freeze EXIT=1
+mA_no_worker_b EXIT=1
+ALLDONE

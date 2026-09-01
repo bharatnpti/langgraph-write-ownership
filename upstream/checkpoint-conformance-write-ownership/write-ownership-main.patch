@@ -1,0 +1,1096 @@
+diff --git a/langgraph/checkpoint/conformance/__init__.py b/langgraph/checkpoint/conformance/__init__.py
+index 304ed47..abc5255 100644
+--- a/langgraph/checkpoint/conformance/__init__.py
++++ b/langgraph/checkpoint/conformance/__init__.py
+@@ -1,9 +1,15 @@
+ """langgraph-checkpoint-conformance: conformance test suite for checkpointer implementations."""
+ 
+ from langgraph.checkpoint.conformance.initializer import checkpointer_test
++from langgraph.checkpoint.conformance.ownership import (
++    StaleWriteOwnerError,
++    is_stale_write_owner_rejection,
++)
+ from langgraph.checkpoint.conformance.validate import validate
+ 
+ __all__ = [
+     "checkpointer_test",
+     "validate",
++    "StaleWriteOwnerError",
++    "is_stale_write_owner_rejection",
+ ]
+diff --git a/langgraph/checkpoint/conformance/capabilities.py b/langgraph/checkpoint/conformance/capabilities.py
+index b65f85d..1a666bf 100644
+--- a/langgraph/checkpoint/conformance/capabilities.py
++++ b/langgraph/checkpoint/conformance/capabilities.py
+@@ -24,6 +24,7 @@ class Capability(str, Enum):
+     COPY_THREAD = "copy_thread"
+     PRUNE = "prune"
+     DELTA_CHANNEL_HISTORY = "delta_channel_history"
++    WRITE_OWNERSHIP = "write_ownership"
+ 
+ 
+ # Capabilities that every checkpointer must support.
+@@ -44,6 +45,7 @@ EXTENDED_CAPABILITIES = frozenset(
+         Capability.COPY_THREAD,
+         Capability.PRUNE,
+         Capability.DELTA_CHANNEL_HISTORY,
++        Capability.WRITE_OWNERSHIP,
+     }
+ )
+ 
+@@ -60,6 +62,11 @@ _CAPABILITY_METHOD_MAP: dict[Capability, str] = {
+     Capability.COPY_THREAD: "acopy_thread",
+     Capability.PRUNE: "aprune",
+     Capability.DELTA_CHANNEL_HISTORY: "aget_delta_channel_history",
++    # Absent from BaseCheckpointSaver entirely -- which is why adding this capability
++    # needs no base-class change. `_is_overridden` below returns True for a method the
++    # base class does not define, so a saver is detected purely by defining it. See
++    # ownership.py.
++    Capability.WRITE_OWNERSHIP: "aclaim_write_ownership",
+ }
+ 
+ 
+diff --git a/langgraph/checkpoint/conformance/ownership.py b/langgraph/checkpoint/conformance/ownership.py
+new file mode 100644
+index 0000000..a9ffb76
+--- /dev/null
++++ b/langgraph/checkpoint/conformance/ownership.py
+@@ -0,0 +1,180 @@
++"""The write-ownership contract: who may write a thread, and how a loser finds out.
++
++This module exists because the suite has no vocabulary for a saver *refusing* a write.
++`aput` returns a `RunnableConfig`, `aput_writes` returns `None`, `ERROR` and `INTERRUPT`
++are payload channel names a saver must store rather than refusals it may issue, and
++`langgraph.checkpoint` ships no errors module at all. So the contract needs a name for
++the refusal before it can have a test.
++
++**Why the marker attribute rather than a shared base class.** A saver that advertises
++this capability must be able to raise a recognisable rejection *without importing a test
++package at runtime*. Requiring `isinstance(exc, StaleWriteOwnerError)` would make
++`langgraph-checkpoint-conformance` a production dependency of every conforming saver,
++which is backwards. So recognition is duck-typed on one attribute
++(`is_stale_write_owner_error = True`), `StaleWriteOwnerError` below is the canonical
++implementation for anyone who wants it, and a saver is free to set the attribute on an
++exception class of its own. If this contract is ever promoted into
++`langgraph-checkpoint`, the marker keeps both spellings working through the transition.
++
++**Why the refusal may be deferred.** The obvious contract -- "the write call raises" --
++is not implementable on at least one real saver. A server-side fence executed inside
++`psycopg`'s pipeline mode does not surface its error from the statement that failed:
++libpq defers it to the next `Sync`, so it arrives from the enclosing context manager's
++exit, and it was measured arriving from a *later* write block entirely in 4 of 11 cases.
++A contract that demands an eager raise would therefore exclude the strongest available
++implementation of the very property it is testing.
++
++So the contract is two-part, and the second part is what makes it observable:
++
++1. **Durability.** A write from a superseded owner must not become durable. This is the
++   part that matters, and it is checked by reading the thread back.
++2. **Observability, by a stated deadline.** The superseded owner must be able to learn
++   it lost -- either because the write raised, or because an explicit
++   `acheck_write_ownership()` barrier raises. Returning normally with no barrier is a
++   *silent* refusal and fails the suite: the runtime then still believes it owns the
++   thread, which is the state that produces a forked checkpoint chain.
++
++That second clause is a deliberate, narrow disagreement with the nearest prior art
++upstream (short-circuiting stale writes after `delete_thread` and returning normally).
++Silence is cheaper to implement and strictly worse to operate: the loser reports success
++to its caller and keeps going.
++
++**What this is not.** Not serialization -- ownership answers *who* may write, not in what
++order, and an unfenced deployment must behave exactly as it does today. Not idempotency
++-- absorbing a duplicate write and refusing a superseded owner are different axes, and
++`test_duplicate_put_writes_from_current_owner_is_not_a_rejection` pins them apart. Not
++exactly-once side effects, which no checkpointer can offer.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Awaitable, Callable
++from typing import Any, Protocol, runtime_checkable
++
++__all__ = [
++    "STALE_WRITE_OWNER_MARKER",
++    "StaleWriteOwnerError",
++    "is_stale_write_owner_rejection",
++    "SupportsWriteOwnership",
++    "observe_rejection",
++]
++
++#: The attribute a rejection carries so the suite can recognise it without an import.
++#: Set it to ``True`` on the exception class a saver raises for a superseded owner.
++STALE_WRITE_OWNER_MARKER = "is_stale_write_owner_error"
++
++
++class StaleWriteOwnerError(Exception):
++    """A superseded write owner attempted a write.
++
++    Canonical implementation of the rejection. A saver may raise this, or may raise its
++    own exception type with :data:`STALE_WRITE_OWNER_MARKER` set truthy on the class --
++    the suite treats the two identically, so advertising the capability never requires
++    importing this package at runtime.
++    """
++
++    is_stale_write_owner_error = True
++
++    def __init__(self, thread_id: str | None = None, detail: str | None = None) -> None:
++        parts = ["write refused: this owner has been superseded"]
++        if thread_id is not None:
++            parts.append(f"thread_id={thread_id!r}")
++        if detail:
++            parts.append(detail)
++        super().__init__(" -- ".join(parts))
++        self.thread_id = thread_id
++
++
++def is_stale_write_owner_rejection(exc: BaseException) -> bool:
++    """Whether *exc* is a saver refusing a write from a superseded owner.
++
++    Duck-typed on :data:`STALE_WRITE_OWNER_MARKER` for the reason in the module
++    docstring. Deliberately not an ``isinstance`` check, and deliberately not a match on
++    an error code: a fenced Postgres saver surfaces the same logical refusal as at least
++    two unrelated psycopg exception types depending on whether the connection was opened
++    with a connection-level pipeline, and a suite that classified by type or SQLSTATE
++    alone would read a *working* fence as a passing one on one of those branches.
++    """
++    return getattr(exc, STALE_WRITE_OWNER_MARKER, False) is True
++
++
++@runtime_checkable
++class SupportsWriteOwnership(Protocol):
++    """What a saver advertising ``write_ownership`` must expose.
++
++    Detection is override-based and keyed on ``aclaim_write_ownership``, so the name has
++    to be distinct: an ownership clause cannot hide inside ``aput``/``aput_writes`` and
++    still be auto-detected. The method is absent from ``BaseCheckpointSaver``, which is
++    exactly why adding this capability needs no base-class change --
++    ``capabilities._is_overridden`` returns ``True`` for a method the base class does not
++    define at all.
++    """
++
++    async def aclaim_write_ownership(self, thread_id: str) -> Any:
++        """Take write ownership of *thread_id*, superseding any current owner.
++
++        Returns an object exposing ``aput`` and ``aput_writes`` whose writes to
++        *thread_id* are accepted only while it remains the current owner. It may be
++        ``self``, a view over the same connection, or a fresh saver -- the suite does not
++        care, and only ever writes through the returned object.
++
++        Claiming must be monotonic: once superseded, an owner cannot become current
++        again. A previous holder may of course claim afresh and receive a *new*
++        ownership; the old handle stays dead.
++        """
++        ...
++
++
++async def observe_rejection(
++    writer: Any,
++    write: Callable[[], Awaitable[Any]],
++    *,
++    what: str,
++) -> BaseException:
++    """Perform *write* from a superseded owner and return the rejection it produced.
++
++    Accepts either deadline: the write itself raising, or the optional
++    ``acheck_write_ownership()`` barrier raising afterwards. Raises ``AssertionError``
++    -- with the diagnosis, not just a boolean -- for the three ways this can go wrong:
++    an unrecognisable exception, a silent refusal with no barrier to ask, and a barrier
++    that reports everything is fine.
++    """
++    try:
++        await write()
++    except BaseException as exc:  # noqa: BLE001 -- classifying, then re-raising
++        if is_stale_write_owner_rejection(exc):
++            return exc
++        raise AssertionError(
++            f"{what} from a superseded owner raised {type(exc).__name__}: {exc} -- "
++            f"which the suite cannot identify as a stale-write-owner rejection, because "
++            f"the exception carries no truthy {STALE_WRITE_OWNER_MARKER!r} attribute. "
++            f"Set that attribute on the exception class (see "
++            f"langgraph.checkpoint.conformance.ownership.StaleWriteOwnerError)."
++        ) from exc
++
++    barrier = getattr(writer, "acheck_write_ownership", None)
++    if barrier is None:
++        raise AssertionError(
++            f"{what} from a superseded owner returned normally, and the writer exposes "
++            f"no acheck_write_ownership() barrier -- so a superseded worker has no way "
++            f"to learn it lost the thread and will report success to its caller. A "
++            f"refusal that is invisible to the loser does not satisfy this capability; "
++            f"either raise from the write, or expose the barrier."
++        )
++
++    try:
++        await barrier()
++    except BaseException as exc:  # noqa: BLE001 -- classifying, then re-raising
++        if is_stale_write_owner_rejection(exc):
++            return exc
++        raise AssertionError(
++            f"acheck_write_ownership() after {what} from a superseded owner raised "
++            f"{type(exc).__name__}: {exc} -- not identifiable as a stale-write-owner "
++            f"rejection (no truthy {STALE_WRITE_OWNER_MARKER!r} attribute)."
++        ) from exc
++
++    raise AssertionError(
++        f"{what} from a superseded owner was refused silently: the write returned "
++        f"normally and acheck_write_ownership() then reported ownership intact. The "
++        f"loser believes it still owns the thread."
++    )
+diff --git a/langgraph/checkpoint/conformance/spec/__init__.py b/langgraph/checkpoint/conformance/spec/__init__.py
+index edcf3d0..33b6c31 100644
+--- a/langgraph/checkpoint/conformance/spec/__init__.py
++++ b/langgraph/checkpoint/conformance/spec/__init__.py
+@@ -17,6 +17,9 @@ from langgraph.checkpoint.conformance.spec.test_list import run_list_tests
+ from langgraph.checkpoint.conformance.spec.test_prune import run_prune_tests
+ from langgraph.checkpoint.conformance.spec.test_put import run_put_tests
+ from langgraph.checkpoint.conformance.spec.test_put_writes import run_put_writes_tests
++from langgraph.checkpoint.conformance.spec.test_write_ownership import (
++    run_write_ownership_tests,
++)
+ 
+ __all__ = [
+     "run_put_tests",
+@@ -28,4 +31,5 @@ __all__ = [
+     "run_copy_thread_tests",
+     "run_prune_tests",
+     "run_delta_channel_history_tests",
++    "run_write_ownership_tests",
+ ]
+diff --git a/langgraph/checkpoint/conformance/spec/test_write_ownership.py b/langgraph/checkpoint/conformance/spec/test_write_ownership.py
+new file mode 100644
+index 0000000..2e48405
+--- /dev/null
++++ b/langgraph/checkpoint/conformance/spec/test_write_ownership.py
+@@ -0,0 +1,467 @@
++"""WRITE_OWNERSHIP capability tests -- aclaim_write_ownership(thread_id).
++
++The failure these clauses describe passes every other capability in this suite.
++
++Two processes, one `thread_id`, `durability="sync"`. Worker A is frozen inside a model
++call; worker B resumes the thread with `invoke(None, config)` and finishes; then A is
++thawed and allowed to write. Both ran the same task at the same checkpoint, so both call
++`put_writes` with the same deterministic `task_id`, and `INSERT ... ON CONFLICT DO
++NOTHING` makes that first-writer-wins -- A's write is discarded while A reports success.
++A then writes its own child of that checkpoint, so the chain forks, and because
++checkpoint ids are time-ordered A's branch (written last) becomes the tip. B's terminal
++checkpoint is now unreachable and the answer B returned to its caller contradicts the
++thread. Both processes exit 0. Nothing raises and nothing logs.
++
++Every clause below is a property that failure violates. `test_..._cannot_fork_the_chain`
++is that scenario reduced to three writes and is the one to read first.
++
++The contract, its two deadlines, and why the refusal is allowed to be deferred are in
++`langgraph.checkpoint.conformance.ownership`. Read that module before changing an
++assertion here; several of these shapes are the way they are because the obvious version
++excludes a real implementation.
++
++Reads go through `saver` -- the factory instance -- never through a claimed writer, for
++two reasons. `aclaim_write_ownership` is only required to return something that can
++write, so a writer may expose no read methods at all; and a saver whose refusal is a
++server-side error may leave the superseded owner's connection unusable, which would turn
++a read through it into a different failure than the one under test.
++"""
++
++from __future__ import annotations
++
++import traceback
++from collections.abc import Callable
++from uuid import uuid4
++
++from langgraph.checkpoint.base import BaseCheckpointSaver
++
++from langgraph.checkpoint.conformance.ownership import (
++    is_stale_write_owner_rejection,
++    observe_rejection,
++)
++from langgraph.checkpoint.conformance.test_utils import (
++    generate_checkpoint,
++    generate_config,
++    generate_metadata,
++)
++
++# --------------------------------------------------------------------- helpers ---
++
++
++async def _put(writer, tid: str, *, parent_id: str | None = None, step: int = 0):
++    """Write one checkpoint to *tid* through *writer*. Returns the stored config."""
++    config = generate_config(tid)
++    if parent_id is not None:
++        config["configurable"]["checkpoint_id"] = parent_id
++    return await writer.aput(config, generate_checkpoint(), generate_metadata(step=step), {})
++
++
++async def _checkpoint_ids(saver: BaseCheckpointSaver, tid: str) -> list[str]:
++    """Every checkpoint id on *tid*, newest first (the order `alist` yields)."""
++    return [tup.checkpoint["id"] async for tup in saver.alist(generate_config(tid))]
++
++
++async def _tip_id(saver: BaseCheckpointSaver, tid: str) -> str | None:
++    """The checkpoint a resume would load -- what `aget_tuple` without an id returns."""
++    tup = await saver.aget_tuple(generate_config(tid))
++    return None if tup is None else tup.checkpoint["id"]
++
++
++async def _pending_writes(saver: BaseCheckpointSaver, tid: str, checkpoint_id: str):
++    """`pending_writes` at a specific checkpoint, or `[]`."""
++    tup = await saver.aget_tuple(generate_config(tid, checkpoint_id=checkpoint_id))
++    if tup is None or tup.pending_writes is None:
++        return []
++    return list(tup.pending_writes)
++
++
++# ----------------------------------------------------------------- the clauses ---
++
++
++async def test_claim_returns_a_writer(saver: BaseCheckpointSaver) -> None:
++    """A claim yields something that can write."""
++    writer = await saver.aclaim_write_ownership(str(uuid4()))
++    assert writer is not None, "aclaim_write_ownership returned None"
++    for method in ("aput", "aput_writes"):
++        assert callable(getattr(writer, method, None)), (
++            f"the object returned by aclaim_write_ownership has no callable {method!r}; "
++            f"the suite writes only through it"
++        )
++
++
++async def test_current_owner_can_put(saver: BaseCheckpointSaver) -> None:
++    """The current owner's checkpoint is durable. Ownership must not cost liveness."""
++    tid = str(uuid4())
++    owner = await saver.aclaim_write_ownership(tid)
++    stored = await _put(owner, tid)
++
++    cp_id = stored["configurable"]["checkpoint_id"]
++    assert await _tip_id(saver, tid) == cp_id, (
++        f"the current owner's checkpoint is not the tip: "
++        f"expected {cp_id}, got {await _tip_id(saver, tid)}"
++    )
++
++
++async def test_current_owner_can_put_writes(saver: BaseCheckpointSaver) -> None:
++    """The current owner's pending write is durable."""
++    tid = str(uuid4())
++    owner = await saver.aclaim_write_ownership(tid)
++    stored = await _put(owner, tid)
++    await owner.aput_writes(stored, [("ch", "owned")], str(uuid4()))
++
++    writes = await _pending_writes(saver, tid, stored["configurable"]["checkpoint_id"])
++    assert len(writes) == 1, f"expected 1 pending write, got {len(writes)}"
++    assert writes[0][2] == "owned", f"value mismatch: {writes[0][2]!r}"
++
++
++async def test_superseded_owner_put_is_rejected(saver: BaseCheckpointSaver) -> None:
++    """A superseded owner learns it lost, at the write or at the barrier.
++
++    This is the clause a silent short-circuit fails. Refusing the write is not enough:
++    a loser that is not told keeps running and reports success to its caller.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    await _put(stale, tid)
++    await saver.aclaim_write_ownership(tid)  # supersedes `stale`
++
++    await observe_rejection(stale, lambda: _put(stale, tid, step=1), what="aput")
++
++
++async def test_superseded_owner_put_is_not_durable(saver: BaseCheckpointSaver) -> None:
++    """The refused checkpoint reached no storage. The rejection is not advisory."""
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    await saver.aclaim_write_ownership(tid)
++
++    before = await _checkpoint_ids(saver, tid)
++    try:
++        await observe_rejection(stale, lambda: _put(stale, tid, step=1), what="aput")
++    except AssertionError:
++        raise  # a silent or unrecognisable refusal is test_..._is_rejected's business
++    after = await _checkpoint_ids(saver, tid)
++
++    assert after == before, (
++        f"a superseded owner's aput changed durable state: {before} -> {after}"
++    )
++    assert after == [first["configurable"]["checkpoint_id"]], (
++        f"expected only the pre-takeover checkpoint to survive, got {after}"
++    )
++
++
++async def test_superseded_owner_cannot_fork_the_chain(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """The reproduction, in three writes.
++
++    A owns the thread and writes `c1`. B takes over and writes `c2` as a child of `c1`.
++    A -- still holding `c1` as its in-memory tip, exactly as a thawed worker does --
++    writes its own child of `c1`. Unfenced, that child is written last, so its
++    time-ordered id makes it the tip and B's `c2` becomes unreachable.
++
++    Afterwards the tip must still be `c2`, and the thread must hold exactly the two
++    checkpoints that were legitimately written.
++    """
++    tid = str(uuid4())
++
++    a = await saver.aclaim_write_ownership(tid)
++    c1 = (await _put(a, tid, step=0))["configurable"]["checkpoint_id"]
++
++    b = await saver.aclaim_write_ownership(tid)
++    c2 = (await _put(b, tid, parent_id=c1, step=1))["configurable"]["checkpoint_id"]
++    assert await _tip_id(saver, tid) == c2, "setup failed: B's checkpoint is not the tip"
++
++    await observe_rejection(
++        a, lambda: _put(a, tid, parent_id=c1, step=1), what="a forking aput"
++    )
++
++    tip = await _tip_id(saver, tid)
++    assert tip == c2, (
++        f"the chain forked: the tip is {tip}, not the current owner's checkpoint {c2}. "
++        f"A resume would load a superseded worker's state and the current owner's "
++        f"terminal checkpoint is unreachable."
++    )
++    assert sorted(await _checkpoint_ids(saver, tid)) == sorted([c1, c2]), (
++        f"unexpected checkpoints on the thread: {await _checkpoint_ids(saver, tid)}, "
++        f"expected exactly {[c1, c2]}"
++    )
++
++
++async def test_superseded_owner_put_writes_is_rejected(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """A superseded owner learns it lost on the `aput_writes` path too.
++
++    Both write paths need the clause: `put_writes` is where the deterministic `task_id`
++    collision happens, and it is the path whose loss is silent today.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    await saver.aclaim_write_ownership(tid)
++
++    await observe_rejection(
++        stale,
++        lambda: stale.aput_writes(first, [("ch", "stale")], str(uuid4())),
++        what="aput_writes",
++    )
++
++
++async def test_superseded_owner_put_writes_is_not_durable(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """A superseded owner's write is absent even when nothing collides with it.
++
++    A fresh `task_id`, so first-writer-wins cannot be what hides it: an unfenced saver
++    stores this row and the transcript then contains a message from a worker that no
++    longer owns the thread.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    cp_id = first["configurable"]["checkpoint_id"]
++    await saver.aclaim_write_ownership(tid)
++
++    await observe_rejection(
++        stale,
++        lambda: stale.aput_writes(first, [("ch", "stale")], str(uuid4())),
++        what="aput_writes",
++    )
++
++    writes = await _pending_writes(saver, tid, cp_id)
++    assert not any(w[2] == "stale" for w in writes), (
++        f"a superseded owner's write is durable at {cp_id}: {writes}"
++    )
++
++
++async def test_superseded_owner_cannot_displace_the_current_owners_write(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """Same checkpoint, same `task_id`, both owners -- the current one's value survives.
++
++    This is the collision itself. The two workers ran the same task at the same
++    checkpoint, so their `task_id`s are equal by construction; whichever statement the
++    saver chooses for the conflict, the value that ends up stored must be the current
++    owner's.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    cp_id = first["configurable"]["checkpoint_id"]
++
++    current = await saver.aclaim_write_ownership(tid)
++    task_id = str(uuid4())
++    await current.aput_writes(first, [("ch", "current")], task_id)
++
++    await observe_rejection(
++        stale,
++        lambda: stale.aput_writes(first, [("ch", "stale")], task_id),
++        what="a colliding aput_writes",
++    )
++
++    writes = await _pending_writes(saver, tid, cp_id)
++    values = [w[2] for w in writes]
++    assert values == ["current"], (
++        f"expected the current owner's value alone at {cp_id}, got {values}"
++    )
++
++
++async def test_superseded_owner_cannot_displace_a_special_channel_write(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """The same collision on a channel whose conflict resolution is last-writer-wins.
++
++    `WRITES_IDX_MAP`'s channels -- `__error__`, `__scheduled__`, `__interrupt__`,
++    `__resume__` -- are special in the base package, and a saver may reasonably treat a
++    write to them as *replacing* rather than duplicating: reserved negative indices mean
++    the later write is the truer one. At least one bundled saver switches statement on
++    exactly this condition, from a first-writer-wins insert to an upsert, whenever every
++    channel in the batch is one of these four.
++
++    Which makes this the one collision where a superseded owner can overwrite live data
++    rather than merely be dropped, and `__resume__` is the worst of the four to lose: it
++    carries the answer a human gave to an interrupt. So the clause is separate from the
++    ordinary-channel one, and named, because the two fail for different reasons.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    cp_id = first["configurable"]["checkpoint_id"]
++
++    current = await saver.aclaim_write_ownership(tid)
++    task_id = str(uuid4())
++    await current.aput_writes(first, [("__resume__", "current")], task_id)
++
++    await observe_rejection(
++        stale,
++        lambda: stale.aput_writes(first, [("__resume__", "stale")], task_id),
++        what="a colliding aput_writes on __resume__",
++    )
++
++    values = [w[2] for w in await _pending_writes(saver, tid, cp_id) if w[1] == "__resume__"]
++    assert values == ["current"], (
++        f"a superseded owner overwrote __resume__ at {cp_id}: expected ['current'], "
++        f"got {values}"
++    )
++
++
++async def test_superseded_owner_stays_superseded(saver: BaseCheckpointSaver) -> None:
++    """The refusal is not one-shot: a second attempt is refused the same way.
++
++    A saver whose fence is a one-time flag, or whose first rejection leaves it unable to
++    classify the second, fails here rather than in production.
++    """
++    tid = str(uuid4())
++    stale = await saver.aclaim_write_ownership(tid)
++    first = await _put(stale, tid)
++    await saver.aclaim_write_ownership(tid)
++
++    await observe_rejection(stale, lambda: _put(stale, tid, step=1), what="aput")
++    await observe_rejection(
++        stale, lambda: _put(stale, tid, step=2), what="a second aput"
++    )
++
++    assert await _checkpoint_ids(saver, tid) == [first["configurable"]["checkpoint_id"]], (
++        "a repeatedly-refused owner still changed durable state"
++    )
++
++
++async def test_ownership_is_per_thread(saver: BaseCheckpointSaver) -> None:
++    """Claiming one thread does not supersede another thread's owner.
++
++    Ownership scoped too broadly -- per saver, per connection, per process -- passes
++    every clause above and breaks every deployment that runs more than one run at a
++    time.
++    """
++    tid1, tid2 = str(uuid4()), str(uuid4())
++    owner1 = await saver.aclaim_write_ownership(tid1)
++    await saver.aclaim_write_ownership(tid2)
++
++    stored = await _put(owner1, tid1, step=1)
++    assert await _tip_id(saver, tid1) == stored["configurable"]["checkpoint_id"], (
++        f"claiming {tid2} superseded the owner of {tid1}"
++    )
++
++
++async def test_new_owner_can_write_after_superseding(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """Recovery works: the taking-over owner writes and its writes are durable.
++
++    A fence that refuses everyone is trivially safe and useless. This is the clause that
++    makes the capability about *transferring* ownership rather than locking a thread.
++    """
++    tid = str(uuid4())
++    old = await saver.aclaim_write_ownership(tid)
++    c1 = (await _put(old, tid))["configurable"]["checkpoint_id"]
++
++    new = await saver.aclaim_write_ownership(tid)
++    c2 = (await _put(new, tid, parent_id=c1, step=1))["configurable"]["checkpoint_id"]
++    await new.aput_writes(
++        generate_config(tid, checkpoint_id=c2), [("ch", "recovered")], str(uuid4())
++    )
++
++    assert await _tip_id(saver, tid) == c2, "the new owner's checkpoint is not the tip"
++    writes = await _pending_writes(saver, tid, c2)
++    assert [w[2] for w in writes] == ["recovered"], (
++        f"the new owner's pending write is missing: {writes}"
++    )
++
++
++async def test_duplicate_put_writes_from_current_owner_is_not_a_rejection(
++    saver: BaseCheckpointSaver,
++) -> None:
++    """Idempotency and ownership are different axes, and this clause pins them apart.
++
++    `test_put_writes_idempotent` stays exactly as correct as it was: absorbing a
++    duplicate write from the owner that already made it is not the same event as
++    refusing a superseded owner, and a saver that conflates them turns every retry into
++    a lost run.
++    """
++    tid = str(uuid4())
++    owner = await saver.aclaim_write_ownership(tid)
++    first = await _put(owner, tid)
++    task_id = str(uuid4())
++
++    await owner.aput_writes(first, [("ch", "v")], task_id)
++    try:
++        await owner.aput_writes(first, [("ch", "v")], task_id)
++    except BaseException as exc:  # noqa: BLE001 -- classifying, then re-raising
++        if is_stale_write_owner_rejection(exc):
++            raise AssertionError(
++                "a duplicate aput_writes from the *current* owner was refused as a "
++                "stale-owner write. Ownership is about who may write, not about "
++                "whether this write was already made."
++            ) from exc
++        raise
++
++    barrier = getattr(owner, "acheck_write_ownership", None)
++    if barrier is not None:
++        await barrier()  # must not raise: the owner never lost anything
++
++
++async def test_reads_do_not_require_ownership(saver: BaseCheckpointSaver) -> None:
++    """A non-owner can still read the thread.
++
++    Load-bearing twice over. Operationally, a worker has to be able to reconcile against
++    a thread's state -- and an operator to inspect it -- without taking it away from
++    whoever is running it. And within this suite, every clause above reads through the
++    unclaimed factory instance, so a saver that fenced its read paths would fail them all
++    for the wrong reason.
++    """
++    tid = str(uuid4())
++    owner = await saver.aclaim_write_ownership(tid)
++    stored = await _put(owner, tid)
++    cp_id = stored["configurable"]["checkpoint_id"]
++
++    tup = await saver.aget_tuple(generate_config(tid))
++    assert tup is not None, "a non-owner's aget_tuple returned None for a written thread"
++    assert tup.checkpoint["id"] == cp_id, "a non-owner read the wrong checkpoint"
++    assert await _checkpoint_ids(saver, tid) == [cp_id], (
++        "a non-owner's alist did not see the owner's checkpoint"
++    )
++
++
++ALL_WRITE_OWNERSHIP_TESTS = [
++    test_claim_returns_a_writer,
++    test_current_owner_can_put,
++    test_current_owner_can_put_writes,
++    test_superseded_owner_put_is_rejected,
++    test_superseded_owner_put_is_not_durable,
++    test_superseded_owner_cannot_fork_the_chain,
++    test_superseded_owner_put_writes_is_rejected,
++    test_superseded_owner_put_writes_is_not_durable,
++    test_superseded_owner_cannot_displace_the_current_owners_write,
++    test_superseded_owner_cannot_displace_a_special_channel_write,
++    test_superseded_owner_stays_superseded,
++    test_ownership_is_per_thread,
++    test_new_owner_can_write_after_superseding,
++    test_duplicate_put_writes_from_current_owner_is_not_a_rejection,
++    test_reads_do_not_require_ownership,
++]
++
++
++async def run_write_ownership_tests(
++    saver: BaseCheckpointSaver,
++    on_test_result: Callable[[str, str, bool, str | None], None] | None = None,
++) -> tuple[int, int, list[str]]:
++    """Run all write_ownership tests. Returns (passed, failed, failure_names)."""
++    passed = 0
++    failed = 0
++    failures: list[str] = []
++    for test_fn in ALL_WRITE_OWNERSHIP_TESTS:
++        try:
++            await test_fn(saver)
++            passed += 1
++            if on_test_result:
++                on_test_result("write_ownership", test_fn.__name__, True, None)
++        except Exception as e:
++            failed += 1
++            msg = f"{test_fn.__name__}: {e}"
++            failures.append(msg)
++            if on_test_result:
++                on_test_result(
++                    "write_ownership", test_fn.__name__, False, traceback.format_exc()
++                )
++    return passed, failed, failures
+diff --git a/langgraph/checkpoint/conformance/validate.py b/langgraph/checkpoint/conformance/validate.py
+index 2f29454..0a84875 100644
+--- a/langgraph/checkpoint/conformance/validate.py
++++ b/langgraph/checkpoint/conformance/validate.py
+@@ -27,6 +27,9 @@ from langgraph.checkpoint.conformance.spec.test_list import run_list_tests
+ from langgraph.checkpoint.conformance.spec.test_prune import run_prune_tests
+ from langgraph.checkpoint.conformance.spec.test_put import run_put_tests
+ from langgraph.checkpoint.conformance.spec.test_put_writes import run_put_writes_tests
++from langgraph.checkpoint.conformance.spec.test_write_ownership import (
++    run_write_ownership_tests,
++)
+ 
+ # Maps capability to its runner function.
+ _RUNNERS = {
+@@ -39,6 +42,7 @@ _RUNNERS = {
+     Capability.COPY_THREAD: run_copy_thread_tests,
+     Capability.PRUNE: run_prune_tests,
+     Capability.DELTA_CHANNEL_HISTORY: run_delta_channel_history_tests,
++    Capability.WRITE_OWNERSHIP: run_write_ownership_tests,
+ }
+ 
+ 
+diff --git a/tests/test_write_ownership.py b/tests/test_write_ownership.py
+new file mode 100644
+index 0000000..2b5e815
+--- /dev/null
++++ b/tests/test_write_ownership.py
+@@ -0,0 +1,337 @@
++"""Self-tests for the WRITE_OWNERSHIP capability. No database, no network.
++
++Five savers, because a conformance clause that nothing fails is decoration -- and because
++the two most contestable choices in this capability should be settled by execution rather
++than by argument:
++
++* `OwnedInMemorySaver` -- a reference implementation, about forty lines over
++  `InMemorySaver`. It exists to show that the contract is small, and to give CI a green
++  fixture.
++* `HostileInMemorySaver` -- advertises the capability and does nothing to honour it,
++  which is what today's savers effectively do. It must fail, and this file asserts
++  *which* clauses it fails, so a later change that quietly weakens one of them turns this
++  file red rather than passing.
++* `SilentInMemorySaver` -- **the contested one.** It genuinely refuses: a superseded
++  owner's writes reach no storage. It just never says so, which is the house style of the
++  nearest prior art upstream. It must fail, and it must fail for the observability reason
++  and not for a durability reason. If a maintainer disagrees with one thing in this
++  capability it will be this, so the disagreement is a named test rather than a paragraph.
++* `DeferredInMemorySaver` -- refuses durably and reports only at the barrier, never from
++  the write. It must **pass**. This is the shape a server-side fence in psycopg pipeline
++  mode is forced into, and if it did not pass, the contract would exclude the strongest
++  available implementation of the property it tests.
++* plain `InMemorySaver` -- must be untouched: the capability undetected, and
++  `passed_all_base()` still true. That is the "extended, never base" property, executed
++  rather than asserted in prose.
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++import pytest
++from langgraph.checkpoint.memory import InMemorySaver
++
++from langgraph.checkpoint.conformance import checkpointer_test, validate
++from langgraph.checkpoint.conformance.capabilities import (
++    BASE_CAPABILITIES,
++    EXTENDED_CAPABILITIES,
++    Capability,
++    DetectedCapabilities,
++)
++from langgraph.checkpoint.conformance.ownership import (
++    StaleWriteOwnerError,
++    is_stale_write_owner_rejection,
++)
++from langgraph.checkpoint.conformance.spec.test_write_ownership import (
++    ALL_WRITE_OWNERSHIP_TESTS,
++)
++
++CAP = Capability.WRITE_OWNERSHIP.value
++
++
++# ------------------------------------------------- the reference implementation ---
++
++
++class _Owner:
++    """A write handle valid only while it holds the thread's current token."""
++
++    def __init__(self, saver: "OwnedInMemorySaver", thread_id: str, token: int) -> None:
++        self._saver = saver
++        self._thread_id = thread_id
++        self._token = token
++
++    def _assert_current(self) -> None:
++        current = self._saver._tokens.get(self._thread_id)
++        if current != self._token:
++            raise StaleWriteOwnerError(
++                self._thread_id,
++                f"held token {self._token}, current token is {current}",
++            )
++
++    async def aput(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any):
++        self._assert_current()
++        return await self._saver.aput(config, checkpoint, metadata, new_versions)
++
++    async def aput_writes(
++        self, config: Any, writes: Any, task_id: str, task_path: str = ""
++    ) -> None:
++        self._assert_current()
++        return await self._saver.aput_writes(config, writes, task_id, task_path)
++
++    async def acheck_write_ownership(self) -> None:
++        """The second deadline. Redundant here -- this implementation refuses eagerly --
++        and implemented anyway, because a saver whose refusal arrives from a later flush
++        needs it and the suite must exercise the path."""
++        self._assert_current()
++
++
++class OwnedInMemorySaver(InMemorySaver):
++    """`InMemorySaver` plus per-thread write ownership."""
++
++    def __init__(self, *args: Any, **kwargs: Any) -> None:
++        super().__init__(*args, **kwargs)
++        self._tokens: dict[str, int] = {}
++
++    async def aclaim_write_ownership(self, thread_id: str) -> _Owner:
++        token = self._tokens.get(thread_id, 0) + 1
++        self._tokens[thread_id] = token
++        return _Owner(self, thread_id, token)
++
++
++class HostileInMemorySaver(InMemorySaver):
++    """Advertises the capability, enforces nothing. The negative control."""
++
++    async def aclaim_write_ownership(self, thread_id: str) -> "HostileInMemorySaver":
++        return self
++
++
++# ------------------------------------------------------ the two shape controls ---
++
++
++class _QuietOwner(_Owner):
++    """Refuses durably, reports nothing. Neither deadline is met."""
++
++    async def aput(self, config: Any, checkpoint: Any, metadata: Any, new_versions: Any):
++        try:
++            self._assert_current()
++        except StaleWriteOwnerError:
++            return config  # dropped, and the caller is none the wiser
++        return await self._saver.aput(config, checkpoint, metadata, new_versions)
++
++    async def aput_writes(
++        self, config: Any, writes: Any, task_id: str, task_path: str = ""
++    ) -> None:
++        try:
++            self._assert_current()
++        except StaleWriteOwnerError:
++            return None
++        return await self._saver.aput_writes(config, writes, task_id, task_path)
++
++    async def acheck_write_ownership(self) -> None:
++        return None  # "everything is fine"
++
++
++class _DeferredOwner(_QuietOwner):
++    """Refuses durably and reports at the barrier only -- the second deadline."""
++
++    async def acheck_write_ownership(self) -> None:
++        self._assert_current()
++
++
++class SilentInMemorySaver(OwnedInMemorySaver):
++    """Real enforcement, no signal. Must fail -- on observability, not durability."""
++
++    async def aclaim_write_ownership(self, thread_id: str) -> _QuietOwner:
++        token = self._tokens.get(thread_id, 0) + 1
++        self._tokens[thread_id] = token
++        return _QuietOwner(self, thread_id, token)
++
++
++class DeferredInMemorySaver(OwnedInMemorySaver):
++    """Real enforcement, reported at the barrier. Must pass."""
++
++    async def aclaim_write_ownership(self, thread_id: str) -> _DeferredOwner:
++        token = self._tokens.get(thread_id, 0) + 1
++        self._tokens[thread_id] = token
++        return _DeferredOwner(self, thread_id, token)
++
++
++@checkpointer_test(name="OwnedInMemorySaver")
++async def owned_checkpointer():
++    yield OwnedInMemorySaver()
++
++
++@checkpointer_test(name="HostileInMemorySaver")
++async def hostile_checkpointer():
++    yield HostileInMemorySaver()
++
++
++@checkpointer_test(name="SilentInMemorySaver")
++async def silent_checkpointer():
++    yield SilentInMemorySaver()
++
++
++@checkpointer_test(name="DeferredInMemorySaver")
++async def deferred_checkpointer():
++    yield DeferredInMemorySaver()
++
++
++@checkpointer_test(name="PlainInMemorySaver")
++async def plain_checkpointer():
++    yield InMemorySaver()
++
++
++# ------------------------------------------------------------------- the marker ---
++
++
++def test_marker_recognises_the_canonical_error():
++    assert is_stale_write_owner_rejection(StaleWriteOwnerError("t"))
++
++
++def test_marker_recognises_a_savers_own_error_type():
++    """The point of duck-typing: no runtime dependency on this package."""
++
++    class MySaverLostTheThread(RuntimeError):
++        is_stale_write_owner_error = True
++
++    assert is_stale_write_owner_rejection(MySaverLostTheThread("gone"))
++
++
++def test_marker_does_not_recognise_unrelated_errors():
++    for exc in (RuntimeError("boom"), ValueError("nope"), KeyError("k")):
++        assert not is_stale_write_owner_rejection(exc)
++
++
++# --------------------------------------------------------------------- detection ---
++
++
++def test_capability_is_extended_not_base():
++    assert Capability.WRITE_OWNERSHIP in EXTENDED_CAPABILITIES
++    assert Capability.WRITE_OWNERSHIP not in BASE_CAPABILITIES
++
++
++def test_detection_is_purely_additive():
++    """Detected by defining the method; absent on savers that do not.
++
++    `aclaim_write_ownership` does not exist on `BaseCheckpointSaver`, so this needs no
++    base-class change and cannot alter how any existing saver is classified.
++    """
++    from langgraph.checkpoint.base import BaseCheckpointSaver
++
++    assert not hasattr(BaseCheckpointSaver, "aclaim_write_ownership")
++    assert (
++        Capability.WRITE_OWNERSHIP
++        in DetectedCapabilities.from_instance(OwnedInMemorySaver()).detected
++    )
++    assert (
++        Capability.WRITE_OWNERSHIP
++        not in DetectedCapabilities.from_instance(InMemorySaver()).detected
++    )
++
++
++# ------------------------------------------------------------------ the verdicts ---
++
++
++@pytest.mark.asyncio
++async def test_reference_implementation_passes():
++    report = await validate(owned_checkpointer, capabilities={CAP})
++    result = report.results[CAP]
++    assert result.detected
++    assert result.passed is True, f"failures: {result.failures}"
++    assert result.tests_passed == len(ALL_WRITE_OWNERSHIP_TESTS)
++
++
++#: What a saver that ignores supersession must fail. Named rather than counted so that a
++#: clause weakened into vacuity is visible here.
++EXPECTED_HOSTILE_FAILURES = {
++    "test_superseded_owner_put_is_rejected",
++    "test_superseded_owner_put_is_not_durable",
++    "test_superseded_owner_cannot_fork_the_chain",
++    "test_superseded_owner_put_writes_is_rejected",
++    "test_superseded_owner_put_writes_is_not_durable",
++    "test_superseded_owner_cannot_displace_the_current_owners_write",
++    "test_superseded_owner_cannot_displace_a_special_channel_write",
++    "test_superseded_owner_stays_superseded",
++}
++
++
++@pytest.mark.asyncio
++async def test_hostile_saver_fails_and_fails_exactly_the_ownership_clauses():
++    """The clause has teeth -- and only where it should.
++
++    Seven of fourteen. The other seven passing is the interesting half: this capability
++    is about *transferring* ownership, so a saver that refused every write, or one whose
++    ownership was scoped to the whole process, would fail clauses a hostile saver passes.
++    """
++    report = await validate(hostile_checkpointer, capabilities={CAP})
++    result = report.results[CAP]
++    assert result.detected
++    assert result.passed is False, "a saver that ignores supersession must not conform"
++
++    failed = {f.split(":", 1)[0] for f in result.failures}
++    assert failed == EXPECTED_HOSTILE_FAILURES, (
++        f"unexpected failure set.\n"
++        f"  missing: {EXPECTED_HOSTILE_FAILURES - failed}\n"
++        f"  extra:   {failed - EXPECTED_HOSTILE_FAILURES}"
++    )
++
++
++@pytest.mark.asyncio
++async def test_a_silent_refusal_does_not_conform():
++    """The deliberate disagreement, as a test.
++
++    This saver's enforcement is real -- the superseded write reaches no storage. It fails
++    only because the loser is never told, so it goes on believing it owns the thread and
++    reports success to its caller. That is the state that produces a forked chain in the
++    first place, so "refused but silent" is not a partial pass here; it is a fail.
++
++    Asserted to fail exactly the clauses a hostile saver fails, which is the point: from
++    the loser's side, silence and no enforcement at all are the same event.
++    """
++    report = await validate(silent_checkpointer, capabilities={CAP})
++    result = report.results[CAP]
++    assert result.passed is False, "a silent refusal must not conform"
++
++    failed = {f.split(":", 1)[0] for f in result.failures}
++    assert failed == EXPECTED_HOSTILE_FAILURES, (
++        f"a silent refusal should fail exactly the clauses a hostile saver does.\n"
++        f"  missing: {EXPECTED_HOSTILE_FAILURES - failed}\n"
++        f"  extra:   {failed - EXPECTED_HOSTILE_FAILURES}"
++    )
++    assert all("returned normally" in f for f in result.failures), (
++        f"expected every failure to be about observability, got: {result.failures}"
++    )
++
++
++@pytest.mark.asyncio
++async def test_a_deferred_refusal_conforms():
++    """The second deadline is real, not a courtesy.
++
++    Nothing here raises from `aput` or `aput_writes`; the refusal is only ever visible
++    from `acheck_write_ownership()`. A server-side fence executed inside psycopg's
++    pipeline mode has no other option -- libpq defers the error past the statement that
++    caused it -- so a contract that demanded an eager raise would exclude it. This clause
++    is what stops that requirement being reintroduced by accident.
++    """
++    report = await validate(deferred_checkpointer, capabilities={CAP})
++    result = report.results[CAP]
++    assert result.passed is True, f"failures: {result.failures}"
++    assert result.tests_passed == len(ALL_WRITE_OWNERSHIP_TESTS)
++
++
++@pytest.mark.asyncio
++async def test_plain_saver_is_unaffected():
++    """No existing saver is reclassified, and base conformance is untouched."""
++    report = await validate(plain_checkpointer)
++    assert report.results[CAP].detected is False
++    assert report.results[CAP].passed is None
++    assert report.passed_all_base(), f"base broke: {report.to_dict()}"
++
++
++@pytest.mark.asyncio
++async def test_reference_implementation_still_passes_base():
++    """Adding ownership does not cost base conformance."""
++    report = await validate(owned_checkpointer)
++    assert report.passed_all_base(), f"base broke: {report.to_dict()}"
++    assert report.results[CAP].passed is True

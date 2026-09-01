@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local env
+.env
+.env.local
+
+# Embedded Postgres data directory used by the test suite
+.pgdata/
+
+# pgbouncer run directories created by spike/q7_pgbouncer.py (configs, logs, pidfiles)
+spike/pgbouncer_run/

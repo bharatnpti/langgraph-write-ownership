@@ -1,0 +1,57 @@
+THE ZOMBIE PROOF -- durable-agents Phase 1
+started 2026-08-30 01:47:55   python 3.12.13
+pinned: langgraph==1.2.11  langgraph-checkpoint==4.2.0  langgraph-checkpoint-postgres==3.1.2  deepagents==0.7.11  langchain-core==1.6.1  psycopg==3.3.4
+postgres: 16.2   pipeline support: True
+scenario: 1 thread, 2 OS processes, deepagents react loop, durability='sync'
+
+pre-flight -- the guard's SQL, and two shapes that look right and are not
+    CASE WHEN <sub>=1 THEN 1 ELSE 1/0 END, fence MATCHES      -> DivisionByZero sqlstate=22012
+    CASE WHEN true THEN 1 ELSE 1/0 END (constant condition)   -> 1
+    1 / (select count(*)...), fence MATCHES                   -> 1
+    1 / (select count(*)...), fence STALE                     -> DivisionByZero sqlstate=22012
+  [PASS] the guard SQL returns 1 when the fence matches and raises 22012 when stale
+
+==============================================================================
+HALF A -- NEGATIVE CONTROL, FENCING OFF (the deliverable)
+==============================================================================
+  worker A (pid 97532) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...c3ae0b71
+  worker B took the thread over with invoke(None, config): ok=True fence=None
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=True error=None
+
+  Assertion 1 -- the checkpoint chain FORKS
+  [PASS] two distinct checkpoints share one parent_checkpoint_id  -- parent ...c3ae0b71 -> children ...c4193901, ...7b4f01ba
+  [PASS] one child written by worker B, one by the thawed zombie A  -- B ...c4193901 / A ...7b4f01ba
+  [PASS] BOTH workers believe they succeeded; neither saw an error
+
+  Assertion 2 -- the consequence: the thread's message list is malformed
+    both workers ran the SAME model task at the fork parent and both wrote messages there;
+    rows actually stored: 1  task_ids=['43843780']  tool_calls=['tc_B2']
+  [PASS] the zombie's AIMessage was silently dropped at the fork parent  -- checkpoint_writes is INSERT ... ON CONFLICT DO NOTHING on a deterministic task_id, so it is first-writer-wins -- yet worker A went on to execute tool_call tc_A2 that no stored AIMessage ever offered
+    thread as read back from the tip:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_A2
+    AIMessage      final answer from A          tool_calls=- tool_call_id=-
+  [PASS] the message list read back from the thread is malformed  -- tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+         + tool_use id='tc_B2' was never answered by a tool_result
+  [PASS] worker B's committed work is no longer reachable from the tip  -- 3 checkpoints orphaned, including B's terminal checkpoint
+    worker B returned to its caller: 'final answer from B'
+    the thread's tip now says:       'final answer from A'
+
+  Assertion 3 -- is it unresumable? (measured and reported, NOT asserted)
+    .next at the tip = ()  (LangGraph thinks the run finished)
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> RuntimeError: provider would reject this request: tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+    Plainly: NOT mechanically unresumable -- LangGraph reads, replays and
+    resumes the forked thread without complaint. What is destroyed is the
+    thread's USABILITY at the next model call, durably. Shown with our own
+    validator, not a real provider's 400 (no API key here).
+
+==============================================================================
+HALF B -- FENCING ON  (pipeline path)
+==============================================================================
+worker A never reached its 2nd model call; aborting

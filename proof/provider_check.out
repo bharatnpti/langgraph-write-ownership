@@ -1,0 +1,28 @@
+endpoint : https://eu.api.openai.com/v1/chat/completions
+model    : gpt-4o-mini
+key      : read from PROVIDER_KEY_FILE, never logged
+
+=== the CORRUPTED thread (fencing was off)  [thread_id=half-a]
+    8 messages; tool_result ids offered by no preceding tool_use: ['tc_A2']
+    HTTP 400   expected 4xx   as expected
+    provider says: Invalid parameter: messages with role 'tool' must be a response to a preceeding message with 'tool_calls'.
+    code=None param=messages.[5].role type=invalid_request_error
+
+=== the FENCED thread (control)  [thread_id=half-b]
+    8 messages; tool_result ids offered by no preceding tool_use: none
+    HTTP 200   expected 2xx   as expected
+    body: {
+  "id": "chatcmpl-EIQtMN8IdwpMjuVYHF9qZ3LbPqnXa",
+  "object": "chat.completion",
+  "created": 1788061984,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message":
+
+==============================================================================
+MEASURED: a real provider REJECTS the corrupted thread and ACCEPTS the
+          fenced one. half-a -> HTTP 400, half-b -> HTTP 200.
+          The corruption is no longer argued from payload shape; it is
+          a measured, reproducible provider-side failure.

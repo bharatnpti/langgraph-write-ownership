@@ -1,0 +1,1555 @@
+2026-08-30 01:51:00.011 IST [99853] LOG:  statement: drop table if exists checkpoints cascade
+2026-08-30 01:51:00.011 IST [99853] LOG:  statement: drop table if exists checkpoint_blobs cascade
+2026-08-30 01:51:00.011 IST [99853] LOG:  statement: drop table if exists checkpoint_writes cascade
+2026-08-30 01:51:00.011 IST [99853] LOG:  statement: drop table if exists checkpoint_migrations cascade
+2026-08-30 01:51:00.011 IST [99853] LOG:  statement: drop table if exists proof_fence cascade
+2026-08-30 01:51:00.011 IST [99853] LOG:  execute <unnamed>: CREATE TABLE IF NOT EXISTS checkpoint_migrations (
+	    v INTEGER PRIMARY KEY
+	);
+2026-08-30 01:51:00.016 IST [99853] LOG:  execute <unnamed>: SELECT v FROM checkpoint_migrations ORDER BY v DESC LIMIT 1
+2026-08-30 01:51:00.017 IST [99853] LOG:  execute <unnamed>: CREATE TABLE IF NOT EXISTS checkpoint_migrations (
+	    v INTEGER PRIMARY KEY
+	);
+2026-08-30 01:51:00.017 IST [99853] LOG:  execute <unnamed>: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.017 IST [99853] DETAIL:  parameters: $1 = '0'
+2026-08-30 01:51:00.017 IST [99853] LOG:  execute <unnamed>: CREATE TABLE IF NOT EXISTS checkpoints (
+	    thread_id TEXT NOT NULL,
+	    checkpoint_ns TEXT NOT NULL DEFAULT '',
+	    checkpoint_id TEXT NOT NULL,
+	    parent_checkpoint_id TEXT,
+	    type TEXT,
+	    checkpoint JSONB NOT NULL,
+	    metadata JSONB NOT NULL DEFAULT '{}',
+	    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+	);
+2026-08-30 01:51:00.019 IST [99853] LOG:  execute <unnamed>: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.019 IST [99853] DETAIL:  parameters: $1 = '1'
+2026-08-30 01:51:00.019 IST [99853] LOG:  execute <unnamed>: CREATE TABLE IF NOT EXISTS checkpoint_blobs (
+	    thread_id TEXT NOT NULL,
+	    checkpoint_ns TEXT NOT NULL DEFAULT '',
+	    channel TEXT NOT NULL,
+	    version TEXT NOT NULL,
+	    type TEXT NOT NULL,
+	    blob BYTEA,
+	    PRIMARY KEY (thread_id, checkpoint_ns, channel, version)
+	);
+2026-08-30 01:51:00.021 IST [99853] LOG:  execute <unnamed>: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.021 IST [99853] DETAIL:  parameters: $1 = '2'
+2026-08-30 01:51:00.021 IST [99853] LOG:  execute <unnamed>: CREATE TABLE IF NOT EXISTS checkpoint_writes (
+	    thread_id TEXT NOT NULL,
+	    checkpoint_ns TEXT NOT NULL DEFAULT '',
+	    checkpoint_id TEXT NOT NULL,
+	    task_id TEXT NOT NULL,
+	    idx INTEGER NOT NULL,
+	    channel TEXT NOT NULL,
+	    type TEXT,
+	    blob BYTEA NOT NULL,
+	    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+	);
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute <unnamed>: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.023 IST [99853] DETAIL:  parameters: $1 = '3'
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute <unnamed>: ALTER TABLE checkpoint_blobs ALTER COLUMN blob DROP not null;
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute <unnamed>: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.023 IST [99853] DETAIL:  parameters: $1 = '4'
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute <unnamed>: SELECT 1;
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute _pg3_0: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.023 IST [99853] DETAIL:  parameters: $1 = '5'
+2026-08-30 01:51:00.023 IST [99853] LOG:  execute <unnamed>: 
+	    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoints_thread_id_idx ON checkpoints(thread_id);
+	    
+2026-08-30 01:51:00.025 IST [99853] LOG:  execute _pg3_0: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.025 IST [99853] DETAIL:  parameters: $1 = '6'
+2026-08-30 01:51:00.025 IST [99853] LOG:  execute <unnamed>: 
+	    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoint_blobs_thread_id_idx ON checkpoint_blobs(thread_id);
+	    
+2026-08-30 01:51:00.027 IST [99853] LOG:  execute _pg3_0: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.027 IST [99853] DETAIL:  parameters: $1 = '7'
+2026-08-30 01:51:00.027 IST [99853] LOG:  execute <unnamed>: 
+	    CREATE INDEX CONCURRENTLY IF NOT EXISTS checkpoint_writes_thread_id_idx ON checkpoint_writes(thread_id);
+	    
+2026-08-30 01:51:00.029 IST [99853] LOG:  execute _pg3_0: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.029 IST [99853] DETAIL:  parameters: $1 = '8'
+2026-08-30 01:51:00.029 IST [99853] LOG:  execute <unnamed>: ALTER TABLE checkpoint_writes ADD COLUMN IF NOT EXISTS task_path TEXT NOT NULL DEFAULT '';
+2026-08-30 01:51:00.029 IST [99853] LOG:  execute _pg3_0: INSERT INTO checkpoint_migrations (v) VALUES ($1)
+2026-08-30 01:51:00.029 IST [99853] DETAIL:  parameters: $1 = '9'
+2026-08-30 01:51:00.029 IST [99853] LOG:  statement: create table if not exists proof_fence (
+	    thread_id text primary key, owner text not null, fence bigint not null)
+2026-08-30 01:51:00.036 IST [99854] LOG:  statement: show server_version
+2026-08-30 01:51:00.039 IST [99855] LOG:  statement: insert into proof_fence values ('pf','x',1) on conflict (thread_id) do update set fence=1
+2026-08-30 01:51:00.042 IST [99855] LOG:  statement: select case when (select count(*)::int from proof_fence where thread_id='pf' and fence=1)=1 then 1 else 1/0 end
+2026-08-30 01:51:00.042 IST [99855] ERROR:  division by zero
+2026-08-30 01:51:00.042 IST [99855] STATEMENT:  select case when (select count(*)::int from proof_fence where thread_id='pf' and fence=1)=1 then 1 else 1/0 end
+2026-08-30 01:51:00.042 IST [99855] LOG:  statement: select case when true then 1 else 1/0 end
+2026-08-30 01:51:00.042 IST [99855] LOG:  statement: select 1/(select count(*)::int from proof_fence where thread_id='pf' and fence=1)
+2026-08-30 01:51:00.042 IST [99855] LOG:  statement: select 1/(select count(*)::int from proof_fence where thread_id='pf' and fence=99)
+2026-08-30 01:51:00.042 IST [99855] ERROR:  division by zero
+2026-08-30 01:51:00.042 IST [99855] STATEMENT:  select 1/(select count(*)::int from proof_fence where thread_id='pf' and fence=99)
+2026-08-30 01:51:00.042 IST [99855] LOG:  statement: delete from proof_fence where thread_id='pf'
+2026-08-30 01:51:01.143 IST [99860] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:01.143 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:01.144 IST [99860] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:01.144 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:01.145 IST [99860] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:01.145 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000001.0.15415758703833315', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c7870594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a267...'
+2026-08-30 01:51:01.146 IST [99860] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:01.146 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f34-68c4-bfff-5b7435cb559b', $4 = NULL, $5 = '{"v": 4, "id": "1f1a3e72-6f34-68c4-bfff-5b7435cb559b", "ts": "2026-08-29T20:21:01.144694+00:00", "versions_seen": {"__input__": {}}, "channe...', $6 = '{"step": -1, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 1], "messages"...'
+2026-08-30 01:51:01.146 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.146 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f34-68c4-bfff-5b7435cb559b', $4 = 'dc9ba590-0dc3-d363-c639-3b453fabf2fd', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ac0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a2676fb16164646974696f6e...'
+2026-08-30 01:51:01.146 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.146 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f34-68c4-bfff-5b7435cb559b', $4 = 'dc9ba590-0dc3-d363-c639-3b453fabf2fd', $5 = '', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:01.148 IST [99860] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:01.148 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f36-68ae-8000-4a606366f350', $4 = '1f1a3e72-6f34-68c4-bfff-5b7435cb559b', $5 = '{"v": 4, "id": "1f1a3e72-6f36-68ae-8000-4a606366f350", "ts": "2026-08-29T20:21:01.145511+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 0, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 2], "messages": ...'
+2026-08-30 01:51:01.150 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.150 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f36-68ae-8000-4a606366f350', $4 = 'd9832392-4c0a-6539-fb55-bd4b5ed8022d', $5 = '', $6 = '0', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:01.150 IST [99860] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:01.150 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f42-6e6a-8001-caf5f384cf03', $4 = '1f1a3e72-6f36-68ae-8000-4a606366f350', $5 = '{"v": 4, "id": "1f1a3e72-6f42-6e6a-8001-caf5f384cf03", "ts": "2026-08-29T20:21:01.150570+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 1, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 3], "messages": ...'
+2026-08-30 01:51:01.156 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.156 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f42-6e6a-8001-caf5f384cf03', $4 = '78b124ef-303c-2598-fb5a-7b8ba14c61db', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011a0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74ad6c6f6f6b696e67207570206b31b16164...'
+2026-08-30 01:51:01.156 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.156 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f42-6e6a-8001-caf5f384cf03', $4 = '78b124ef-303c-2598-fb5a-7b8ba14c61db', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131a4...'
+2026-08-30 01:51:01.158 IST [99860] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:01.158 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000004.0.026995869316391863', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131...'
+2026-08-30 01:51:01.158 IST [99860] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:01.158 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f51-6b18-8002-bc7675eda0e3', $4 = '1f1a3e72-6f42-6e6a-8001-caf5f384cf03', $5 = '{"v": 4, "id": "1f1a3e72-6f51-6b18-8002-bc7675eda0e3", "ts": "2026-08-29T20:21:01.156630+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 2, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 4], "messages": ...'
+2026-08-30 01:51:01.161 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.161 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f51-6b18-8002-bc7675eda0e3', $4 = '1bf04135-3be0-3d0c-c642-ff8e0edf6cfd', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b31b161...'
+2026-08-30 01:51:01.161 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:01.161 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f51-6b18-8002-bc7675eda0e3', $4 = '1bf04135-3be0-3d0c-c642-ff8e0edf6cfd', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:01.164 IST [99860] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:01.164 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000005.0.09328218506950658', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:01.164 IST [99860] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:01.164 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $4 = '1f1a3e72-6f51-6b18-8002-bc7675eda0e3', $5 = '{"v": 4, "id": "1f1a3e72-6f5c-68ec-8003-9c4a2456b547", "ts": "2026-08-29T20:21:01.161079+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 3, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 5], "messages": ...'
+2026-08-30 01:51:01.201 IST [99862] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:01.201 IST [99862] DETAIL:  parameters: $1 = 'half-a'
+2026-08-30 01:51:02.558 IST [99868] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:02.558 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:02.559 IST [99868] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:02.559 IST [99868] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-a', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:02.559 IST [99868] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:02.559 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-6f51-6b18-8002-bc7675eda0e3,1f1a3e72-6f42-6e6a-8001-caf5f384cf03,1f1a3e72-6f36-68ae-8000-4a606366f350,1f1a3e72-6f34-68c4-bfff-5b74...', $5 = 'half-a', $6 = '', $7 = 'files', $8 = '{1f1a3e72-6f51-6b18-8002-bc7675eda0e3,1f1a3e72-6f42-6e6a-8001-caf5f384cf03,1f1a3e72-6f36-68ae-8000-4a606366f350,1f1a3e72-6f34-68c4-bfff-5b74...'
+2026-08-30 01:51:02.565 IST [99868] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.565 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $4 = '9630d94b-e1f2-c928-ef6f-483aafa3e3eb', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011c0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74af776f726b65722042207475726e2032b1...'
+2026-08-30 01:51:02.565 IST [99868] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.565 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $4 = '9630d94b-e1f2-c928-ef6f-483aafa3e3eb', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232a4...'
+2026-08-30 01:51:02.568 IST [99868] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:02.568 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000006.0.5703913530141077', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232...'
+2026-08-30 01:51:02.569 IST [99868] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.569 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7cc2-61ee-8004-65d3b67f24fa', $4 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $5 = '{"v": 4, "id": "1f1a3e72-7cc2-61ee-8004-65d3b67f24fa", "ts": "2026-08-29T20:21:02.565451+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 4, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 6], "messages": ...'
+2026-08-30 01:51:02.571 IST [99868] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.571 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7cc2-61ee-8004-65d3b67f24fa', $4 = '122bdc47-fdce-bac0-f18a-375e5cd35d76', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b32b161...'
+2026-08-30 01:51:02.571 IST [99868] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.571 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7cc2-61ee-8004-65d3b67f24fa', $4 = '122bdc47-fdce-bac0-f18a-375e5cd35d76', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:02.573 IST [99868] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:02.573 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000007.0.07291829954263784', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:02.573 IST [99868] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.573 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ccf-6e0c-8005-d800264127c5', $4 = '1f1a3e72-7cc2-61ee-8004-65d3b67f24fa', $5 = '{"v": 4, "id": "1f1a3e72-7ccf-6e0c-8005-d800264127c5", "ts": "2026-08-29T20:21:02.571464+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 5, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 7], "messages": ...'
+2026-08-30 01:51:02.577 IST [99868] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.577 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ccf-6e0c-8005-d800264127c5', $4 = '73074bc4-4b7c-0ce9-e040-205667f26b85', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ee0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74b366696e616c20616e737765722066726f6d...'
+2026-08-30 01:51:02.579 IST [99868] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.579 IST [99868] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7cdd-6a20-8006-44b7f246a5da', $4 = '1f1a3e72-7ccf-6e0c-8005-d800264127c5', $5 = '{"v": 4, "id": "1f1a3e72-7cdd-6a20-8006-44b7f246a5da", "ts": "2026-08-29T20:21:02.577097+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 6, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 8], "messages": ...'
+2026-08-30 01:51:02.777 IST [99870] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:02.777 IST [99870] DETAIL:  parameters: $1 = 'half-a'
+2026-08-30 01:51:02.778 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.778 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $4 = '9630d94b-e1f2-c928-ef6f-483aafa3e3eb', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011c0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74af776f726b65722041207475726e2032b1...'
+2026-08-30 01:51:02.778 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.778 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $4 = '9630d94b-e1f2-c928-ef6f-483aafa3e3eb', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4132a4...'
+2026-08-30 01:51:02.780 IST [99860] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:02.780 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000006.0.3492698977029949', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4132...'
+2026-08-30 01:51:02.780 IST [99860] LOG:  execute _pg3_2: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.780 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ec8-6aba-8004-933326e7bc68', $4 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547', $5 = '{"v": 4, "id": "1f1a3e72-7ec8-6aba-8004-933326e7bc68", "ts": "2026-08-29T20:21:02.778225+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 4, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 6], "messages": ...'
+2026-08-30 01:51:02.783 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.783 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ec8-6aba-8004-933326e7bc68', $4 = '5ade2728-79e2-2861-e1db-ef2bbe45c2a9', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b32b161...'
+2026-08-30 01:51:02.783 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.783 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ec8-6aba-8004-933326e7bc68', $4 = '5ade2728-79e2-2861-e1db-ef2bbe45c2a9', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:02.785 IST [99860] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:02.785 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000007.0.6077908054216372', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:02.785 IST [99860] LOG:  execute _pg3_2: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.785 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ed6-61c4-8005-7d113468cf99', $4 = '1f1a3e72-7ec8-6aba-8004-933326e7bc68', $5 = '{"v": 4, "id": "1f1a3e72-7ed6-61c4-8005-7d113468cf99", "ts": "2026-08-29T20:21:02.783732+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 5, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 7], "messages": ...'
+2026-08-30 01:51:02.789 IST [99860] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:02.789 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ed6-61c4-8005-7d113468cf99', $4 = 'd5b55daa-2767-faf7-60dc-ce485a6a6f9e', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ee0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74b366696e616c20616e737765722066726f6d...'
+2026-08-30 01:51:02.791 IST [99860] LOG:  execute _pg3_2: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:02.791 IST [99860] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-7ee3-6144-8006-5f8dd10e3d95', $4 = '1f1a3e72-7ed6-61c4-8005-7d113468cf99', $5 = '{"v": 4, "id": "1f1a3e72-7ee3-6144-8006-5f8dd10e3d95", "ts": "2026-08-29T20:21:02.789044+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 6, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 8], "messages": ...'
+2026-08-30 01:51:03.078 IST [99871] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:03.078 IST [99871] DETAIL:  parameters: $1 = 'half-a'
+2026-08-30 01:51:03.081 IST [99872] LOG:  execute <unnamed>: select task_id, type, blob from checkpoint_writes where thread_id=$1 and checkpoint_ns='' and checkpoint_id=$2 and channel='messages'
+2026-08-30 01:51:03.081 IST [99872] DETAIL:  parameters: $1 = 'half-a', $2 = '1f1a3e72-6f5c-68ec-8003-9c4a2456b547'
+2026-08-30 01:51:03.114 IST [99873] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:03.114 IST [99873] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:03.114 IST [99873] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:03.114 IST [99873] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-a', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:03.115 IST [99873] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:03.115 IST [99873] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...', $5 = 'half-a', $6 = '', $7 = 'files', $8 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...'
+2026-08-30 01:51:03.130 IST [99874] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:03.130 IST [99874] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:03.131 IST [99874] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:03.131 IST [99874] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-a', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:03.132 IST [99874] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:03.132 IST [99874] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...', $5 = 'half-a', $6 = '', $7 = 'files', $8 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...'
+2026-08-30 01:51:03.146 IST [99875] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:03.146 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = ''
+2026-08-30 01:51:03.147 IST [99875] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:03.147 IST [99875] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-a', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:03.148 IST [99875] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:03.148 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...', $5 = 'half-a', $6 = '', $7 = 'files', $8 = '{1f1a3e72-7ed6-61c4-8005-7d113468cf99,1f1a3e72-7ec8-6aba-8004-933326e7bc68,1f1a3e72-6f5c-68ec-8003-9c4a2456b547,1f1a3e72-6f51-6b18-8002-bc76...'
+2026-08-30 01:51:03.151 IST [99875] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:03.151 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000009.0.4886784567790108', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c78d0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a863...'
+2026-08-30 01:51:03.151 IST [99875] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:03.151 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8253-6e0a-8007-58681b71be71', $4 = '1f1a3e72-7ee3-6144-8006-5f8dd10e3d95', $5 = '{"v": 4, "id": "1f1a3e72-8253-6e0a-8007-58681b71be71", "ts": "2026-08-29T20:21:03.149430+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 7, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 9], "messages":...'
+2026-08-30 01:51:03.156 IST [99875] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:03.156 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8253-6e0a-8007-58681b71be71', $4 = '7b1196c0-693e-4b00-e8fe-3a49b2f449ac', $5 = '~__pregel_pull, __start__', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7b20594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a8636f6e74696e7565b16164...'
+2026-08-30 01:51:03.156 IST [99875] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:03.156 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8253-6e0a-8007-58681b71be71', $4 = '7b1196c0-693e-4b00-e8fe-3a49b2f449ac', $5 = '~__pregel_pull, __start__', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:03.157 IST [99875] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:03.157 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8257-6884-8008-044beacfdc9b', $4 = '1f1a3e72-8253-6e0a-8007-58681b71be71', $5 = '{"v": 4, "id": "1f1a3e72-8257-6884-8008-044beacfdc9b", "ts": "2026-08-29T20:21:03.151300+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 8, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 10], "messages":...'
+2026-08-30 01:51:03.158 IST [99875] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:03.158 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8257-6884-8008-044beacfdc9b', $4 = '4f09bf36-7ca3-ba6b-a45d-eb736cfd8bc0', $5 = '~__pregel_pull, PatchToolCallsMiddleware.before_agent', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x99c7990594d9206c616e67636861696e5f636f72652e6d657373616765732e6d6f646966696572ad52656d6f76654d65737361676586a7636f6e74656e74a0b16164646974...'
+2026-08-30 01:51:03.159 IST [99875] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:03.159 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8257-6884-8008-044beacfdc9b', $4 = '4f09bf36-7ca3-ba6b-a45d-eb736cfd8bc0', $5 = '~__pregel_pull, PatchToolCallsMiddleware.before_agent', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:03.159 IST [99875] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:03.159 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8269-6232-8009-a5edb171e003', $4 = '1f1a3e72-8257-6884-8008-044beacfdc9b', $5 = '{"v": 4, "id": "1f1a3e72-8269-6232-8009-a5edb171e003", "ts": "2026-08-29T20:21:03.158516+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 9, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 11], "messages":...'
+2026-08-30 01:51:03.164 IST [99875] LOG:  execute _pg3_2: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO UPDATE SET
+	        channel = EXCLUDED.channel,
+	        type = EXCLUDED.type,
+	        blob = EXCLUDED.blob;
+	
+2026-08-30 01:51:03.164 IST [99875] DETAIL:  parameters: $1 = 'half-a', $2 = '', $3 = '1f1a3e72-8269-6232-8009-a5edb171e003', $4 = '3082961f-7fea-2f23-c82d-53a3ff2d9ace', $5 = '~__pregel_pull, model', $6 = '-1', $7 = '__error__', $8 = 'msgpack', $9 = '\xd99552756e74696d654572726f72282270726f766964657220776f756c642072656a656374207468697320726571756573743a20746f6f6c5f726573756c7420746f6f6c5f...'
+2026-08-30 01:51:03.169 IST [99877] LOG:  execute <unnamed>: insert into proof_fence values ($1,$2,1) on conflict (thread_id) do update set owner=$3, fence=1
+2026-08-30 01:51:03.169 IST [99877] DETAIL:  parameters: $1 = 'half-b', $2 = 'A', $3 = 'A'
+2026-08-30 01:51:04.418 IST [99887] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:04.418 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:04.418 IST [99887] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:04.418 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:04.419 IST [99887] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.419 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.419 IST [99887] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:04.419 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000001.0.47418062286519347', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c7ac0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a267...'
+2026-08-30 01:51:04.420 IST [99887] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:04.420 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e6e-6b86-bfff-b20b45f6be02', $4 = NULL, $5 = '{"v": 4, "id": "1f1a3e72-8e6e-6b86-bfff-b20b45f6be02", "ts": "2026-08-29T20:21:04.419106+00:00", "versions_seen": {"__input__": {}}, "channe...', $6 = '{"step": -1, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 1], "messages"...'
+2026-08-30 01:51:04.420 IST [99887] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.420 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.420 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.420 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e6e-6b86-bfff-b20b45f6be02', $4 = 'b5bb7df1-a6b9-e3e9-cc9e-645105f5a5dc', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ac0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a2676fb16164646974696f6e...'
+2026-08-30 01:51:04.420 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.420 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e6e-6b86-bfff-b20b45f6be02', $4 = 'b5bb7df1-a6b9-e3e9-cc9e-645105f5a5dc', $5 = '', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:04.422 IST [99887] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.422 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.422 IST [99887] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:04.422 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e71-6cb4-8000-0f84d9356bf3', $4 = '1f1a3e72-8e6e-6b86-bfff-b20b45f6be02', $5 = '{"v": 4, "id": "1f1a3e72-8e71-6cb4-8000-0f84d9356bf3", "ts": "2026-08-29T20:21:04.420364+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 0, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 2], "messages": ...'
+2026-08-30 01:51:04.425 IST [99887] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.425 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.425 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.425 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e71-6cb4-8000-0f84d9356bf3', $4 = '6696f0be-c9ad-2d0d-cfe1-7e4e957841f4', $5 = '', $6 = '0', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:04.425 IST [99887] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.425 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.425 IST [99887] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:04.425 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e7d-6956-8001-864b278975d8', $4 = '1f1a3e72-8e71-6cb4-8000-0f84d9356bf3', $5 = '{"v": 4, "id": "1f1a3e72-8e7d-6956-8001-864b278975d8", "ts": "2026-08-29T20:21:04.425193+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 1, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 3], "messages": ...'
+2026-08-30 01:51:04.431 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.431 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.431 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.431 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e7d-6956-8001-864b278975d8', $4 = '7166681f-e99f-edb2-47e1-cc6b6b56164c', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011a0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74ad6c6f6f6b696e67207570206b31b16164...'
+2026-08-30 01:51:04.431 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.431 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e7d-6956-8001-864b278975d8', $4 = '7166681f-e99f-edb2-47e1-cc6b6b56164c', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131a4...'
+2026-08-30 01:51:04.434 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.434 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.434 IST [99887] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:04.434 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000004.0.5803193089036875', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131...'
+2026-08-30 01:51:04.434 IST [99887] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:04.434 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e8c-6762-8002-66b29b652bb7', $4 = '1f1a3e72-8e7d-6956-8001-864b278975d8', $5 = '{"v": 4, "id": "1f1a3e72-8e8c-6762-8002-66b29b652bb7", "ts": "2026-08-29T20:21:04.431286+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 2, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 4], "messages": ...'
+2026-08-30 01:51:04.436 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.436 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.436 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.436 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e8c-6762-8002-66b29b652bb7', $4 = 'ee03d48c-0eee-9a93-5889-f2efaf574702', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b31b161...'
+2026-08-30 01:51:04.436 IST [99887] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:04.436 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e8c-6762-8002-66b29b652bb7', $4 = 'ee03d48c-0eee-9a93-5889-f2efaf574702', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:04.439 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:04.439 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:04.439 IST [99887] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:04.439 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000005.0.809331801588783', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:04.439 IST [99887] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:04.439 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e99-6b74-8003-d0785638f27c', $4 = '1f1a3e72-8e8c-6762-8002-66b29b652bb7', $5 = '{"v": 4, "id": "1f1a3e72-8e99-6b74-8003-d0785638f27c", "ts": "2026-08-29T20:21:04.436715+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 3, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 5], "messages": ...'
+2026-08-30 01:51:04.464 IST [99889] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:04.464 IST [99889] DETAIL:  parameters: $1 = 'half-b'
+2026-08-30 01:51:05.498 IST [99894] LOG:  execute <unnamed>: update proof_fence set fence = fence + 1, owner = $1
+	 where thread_id = $2 and fence = $3 returning fence
+2026-08-30 01:51:05.498 IST [99894] DETAIL:  parameters: $1 = 'B', $2 = 'half-b', $3 = '1'
+2026-08-30 01:51:05.541 IST [99895] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:05.541 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:05.542 IST [99895] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:05.542 IST [99895] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:05.542 IST [99895] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:05.542 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-8e8c-6762-8002-66b29b652bb7,1f1a3e72-8e7d-6956-8001-864b278975d8,1f1a3e72-8e71-6cb4-8000-0f84d9356bf3,1f1a3e72-8e6e-6b86-bfff-b20b...', $5 = 'half-b', $6 = '', $7 = 'files', $8 = '{1f1a3e72-8e8c-6762-8002-66b29b652bb7,1f1a3e72-8e7d-6956-8001-864b278975d8,1f1a3e72-8e71-6cb4-8000-0f84d9356bf3,1f1a3e72-8e6e-6b86-bfff-b20b...'
+2026-08-30 01:51:05.548 IST [99895] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.548 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.548 IST [99895] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:05.548 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e99-6b74-8003-d0785638f27c', $4 = '0edd5b73-c97e-c8d5-3d66-d345fcbb6671', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011c0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74af776f726b65722042207475726e2032b1...'
+2026-08-30 01:51:05.550 IST [99895] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:05.550 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-8e99-6b74-8003-d0785638f27c', $4 = '0edd5b73-c97e-c8d5-3d66-d345fcbb6671', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232a4...'
+2026-08-30 01:51:05.552 IST [99895] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.552 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.552 IST [99895] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:05.552 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000006.0.1983855966797744', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232...'
+2026-08-30 01:51:05.552 IST [99895] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:05.552 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9933-6030-8004-d341c6bce671', $4 = '1f1a3e72-8e99-6b74-8003-d0785638f27c', $5 = '{"v": 4, "id": "1f1a3e72-9933-6030-8004-d341c6bce671", "ts": "2026-08-29T20:21:05.547683+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 4, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 6], "messages": ...'
+2026-08-30 01:51:05.556 IST [99895] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.556 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.556 IST [99895] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:05.556 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9933-6030-8004-d341c6bce671', $4 = 'a129ecbe-b42d-aac5-4f1c-8da63201dda4', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b32b161...'
+2026-08-30 01:51:05.556 IST [99895] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:05.556 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9933-6030-8004-d341c6bce671', $4 = 'a129ecbe-b42d-aac5-4f1c-8da63201dda4', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:05.558 IST [99895] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.558 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.558 IST [99895] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:05.558 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000007.0.3931119434429371', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:05.558 IST [99895] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:05.558 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9946-6018-8005-2c4a04417371', $4 = '1f1a3e72-9933-6030-8004-d341c6bce671', $5 = '{"v": 4, "id": "1f1a3e72-9946-6018-8005-2c4a04417371", "ts": "2026-08-29T20:21:05.555859+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 5, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 7], "messages": ...'
+2026-08-30 01:51:05.561 IST [99895] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.561 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.561 IST [99895] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:05.561 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9946-6018-8005-2c4a04417371', $4 = '9a050ba4-4cb2-e355-61c9-c2e2f7997a06', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ee0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74b366696e616c20616e737765722066726f6d...'
+2026-08-30 01:51:05.563 IST [99895] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.563 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '2'
+2026-08-30 01:51:05.563 IST [99895] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:05.563 IST [99895] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9953-66aa-8006-75e2f0373092', $4 = '1f1a3e72-9946-6018-8005-2c4a04417371', $5 = '{"v": 4, "id": "1f1a3e72-9953-66aa-8006-75e2f0373092", "ts": "2026-08-29T20:21:05.561353+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 6, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 8], "messages": ...'
+2026-08-30 01:51:05.769 IST [99897] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:05.769 IST [99897] DETAIL:  parameters: $1 = 'half-b'
+2026-08-30 01:51:05.770 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.770 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:05.770 IST [99887] ERROR:  division by zero
+2026-08-30 01:51:05.770 IST [99887] STATEMENT:  select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.772 IST [99887] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.772 IST [99887] DETAIL:  parameters: $1 = 'half-b', $2 = '1'
+2026-08-30 01:51:05.772 IST [99887] ERROR:  division by zero
+2026-08-30 01:51:05.772 IST [99887] STATEMENT:  select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:05.977 IST [99898] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:05.977 IST [99898] DETAIL:  parameters: $1 = 'half-b'
+2026-08-30 01:51:05.979 IST [99899] LOG:  execute <unnamed>: select fence from proof_fence where thread_id=$1
+2026-08-30 01:51:05.979 IST [99899] DETAIL:  parameters: $1 = 'half-b'
+2026-08-30 01:51:05.992 IST [99900] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:05.992 IST [99900] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:05.992 IST [99900] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:05.992 IST [99900] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:05.992 IST [99900] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:05.992 IST [99900] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...', $5 = 'half-b', $6 = '', $7 = 'files', $8 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...'
+2026-08-30 01:51:06.004 IST [99901] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:06.004 IST [99901] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:06.004 IST [99901] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:06.004 IST [99901] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:06.004 IST [99901] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:06.004 IST [99901] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...', $5 = 'half-b', $6 = '', $7 = 'files', $8 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...'
+2026-08-30 01:51:06.016 IST [99902] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:06.016 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = ''
+2026-08-30 01:51:06.016 IST [99902] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:06.016 IST [99902] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:06.016 IST [99902] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:06.016 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...', $5 = 'half-b', $6 = '', $7 = 'files', $8 = '{1f1a3e72-9946-6018-8005-2c4a04417371,1f1a3e72-9933-6030-8004-d341c6bce671,1f1a3e72-8e99-6b74-8003-d0785638f27c,1f1a3e72-8e8c-6762-8002-66b2...'
+2026-08-30 01:51:06.017 IST [99902] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:06.017 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000009.0.4596276623558776', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c78d0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a863...'
+2026-08-30 01:51:06.017 IST [99902] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:06.017 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dab-691e-8007-9ae60d077497', $4 = '1f1a3e72-9953-66aa-8006-75e2f0373092', $5 = '{"v": 4, "id": "1f1a3e72-9dab-691e-8007-9ae60d077497", "ts": "2026-08-29T20:21:06.016878+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 7, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 9], "messages":...'
+2026-08-30 01:51:06.017 IST [99902] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:06.017 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dab-691e-8007-9ae60d077497', $4 = '0413e55f-ba58-64fc-dbfd-4172f9a7b474', $5 = '~__pregel_pull, __start__', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7b20594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a8636f6e74696e7565b16164...'
+2026-08-30 01:51:06.017 IST [99902] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:06.017 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dab-691e-8007-9ae60d077497', $4 = '0413e55f-ba58-64fc-dbfd-4172f9a7b474', $5 = '~__pregel_pull, __start__', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:06.018 IST [99902] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:06.018 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dac-6ec2-8008-ee0279b7deb8', $4 = '1f1a3e72-9dab-691e-8007-9ae60d077497', $5 = '{"v": 4, "id": "1f1a3e72-9dac-6ec2-8008-ee0279b7deb8", "ts": "2026-08-29T20:21:06.017448+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 8, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 10], "messages":...'
+2026-08-30 01:51:06.018 IST [99902] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:06.018 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dac-6ec2-8008-ee0279b7deb8', $4 = '55ed4ea9-fa55-218f-38af-48adf3554fe7', $5 = '~__pregel_pull, PatchToolCallsMiddleware.before_agent', $6 = '0', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:06.018 IST [99902] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:06.018 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9daf-679e-8009-2ac24aaa2392', $4 = '1f1a3e72-9dac-6ec2-8008-ee0279b7deb8', $5 = '{"v": 4, "id": "1f1a3e72-9daf-679e-8009-2ac24aaa2392", "ts": "2026-08-29T20:21:06.018494+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 9, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 11], "messages":...'
+2026-08-30 01:51:06.023 IST [99902] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:06.023 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9daf-679e-8009-2ac24aaa2392', $4 = '0212db43-507b-6e7b-ccc3-c966845f28f2', $5 = '~__pregel_pull, model', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7df0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74a4646f6e65b16164646974696f6e616c5f6b...'
+2026-08-30 01:51:06.023 IST [99902] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:06.023 IST [99902] DETAIL:  parameters: $1 = 'half-b', $2 = '', $3 = '1f1a3e72-9dba-6572-800a-916b3af064d4', $4 = '1f1a3e72-9daf-679e-8009-2ac24aaa2392', $5 = '{"v": 4, "id": "1f1a3e72-9dba-6572-800a-916b3af064d4", "ts": "2026-08-29T20:21:06.022945+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 10, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 12], "messages"...'
+2026-08-30 01:51:06.025 IST [99903] LOG:  execute <unnamed>: insert into proof_fence values ($1,$2,1) on conflict (thread_id) do update set owner=$3, fence=1
+2026-08-30 01:51:06.025 IST [99903] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = 'A', $3 = 'A'
+2026-08-30 01:51:07.340 IST [99912] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:07.340 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:07.341 IST [99912] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:07.341 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:07.341 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.342 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.342 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.342 IST [99912] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:07.342 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000001.0.8056064168138954', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c7ac0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a267...'
+2026-08-30 01:51:07.343 IST [99912] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:07.343 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa4d-65dc-bfff-ddd4c55eabf5', $4 = NULL, $5 = '{"v": 4, "id": "1f1a3e72-aa4d-65dc-bfff-ddd4c55eabf5", "ts": "2026-08-29T20:21:07.341457+00:00", "versions_seen": {"__input__": {}}, "channe...', $6 = '{"step": -1, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 1], "messages"...'
+2026-08-30 01:51:07.343 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.343 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.343 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.343 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.343 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.343 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa4d-65dc-bfff-ddd4c55eabf5', $4 = '99920c80-11d4-1573-4f96-52939de44998', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ac0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a2676fb16164646974696f6e...'
+2026-08-30 01:51:07.343 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.343 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa4d-65dc-bfff-ddd4c55eabf5', $4 = '99920c80-11d4-1573-4f96-52939de44998', $5 = '', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:07.343 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.345 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.345 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.345 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.345 IST [99912] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:07.345 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa4e-67ca-8000-7f6dcd27714e', $4 = '1f1a3e72-aa4d-65dc-bfff-ddd4c55eabf5', $5 = '{"v": 4, "id": "1f1a3e72-aa4e-67ca-8000-7f6dcd27714e", "ts": "2026-08-29T20:21:07.341917+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 0, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 2], "messages": ...'
+2026-08-30 01:51:07.345 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.347 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.348 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.348 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.348 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.348 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa4e-67ca-8000-7f6dcd27714e', $4 = '54a82162-f63c-5f33-52ca-77b359c9f61b', $5 = '', $6 = '0', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:07.348 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.348 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.348 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.348 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.348 IST [99912] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:07.348 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa5d-60e0-8001-8831ef5e565d', $4 = '1f1a3e72-aa4e-67ca-8000-7f6dcd27714e', $5 = '{"v": 4, "id": "1f1a3e72-aa5d-60e0-8001-8831ef5e565d", "ts": "2026-08-29T20:21:07.347881+00:00", "versions_seen": {"__input__": {}, "__start...', $6 = '{"step": 1, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 3], "messages": ...'
+2026-08-30 01:51:07.348 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.354 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.354 IST [99912] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.354 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.354 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.354 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa5d-60e0-8001-8831ef5e565d', $4 = '4f65e4c2-16d1-4f38-ab73-e261af491e45', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011a0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74ad6c6f6f6b696e67207570206b31b16164...'
+2026-08-30 01:51:07.354 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.354 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa5d-60e0-8001-8831ef5e565d', $4 = '4f65e4c2-16d1-4f38-ab73-e261af491e45', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131a4...'
+2026-08-30 01:51:07.354 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.356 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.356 IST [99912] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.356 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.356 IST [99912] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:07.356 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000004.0.6188908375641378', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b31a26964a574635f4131...'
+2026-08-30 01:51:07.356 IST [99912] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:07.356 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa6c-6c66-8002-0856d55e1dc7', $4 = '1f1a3e72-aa5d-60e0-8001-8831ef5e565d', $5 = '{"v": 4, "id": "1f1a3e72-aa6c-6c66-8002-0856d55e1dc7", "ts": "2026-08-29T20:21:07.354319+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 2, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 4], "messages": ...'
+2026-08-30 01:51:07.357 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.359 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.359 IST [99912] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.359 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.359 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.359 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa6c-6c66-8002-0856d55e1dc7', $4 = '00c0776d-ee47-5910-225c-a493c7cc19f5', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b31b161...'
+2026-08-30 01:51:07.359 IST [99912] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:07.359 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa6c-6c66-8002-0856d55e1dc7', $4 = '00c0776d-ee47-5910-225c-a493c7cc19f5', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:07.359 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.361 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:07.361 IST [99912] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:07.361 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:07.361 IST [99912] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:07.361 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000005.0.9904439957918382', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:07.361 IST [99912] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:07.361 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa79-6e02-8003-b923e10e81bb', $4 = '1f1a3e72-aa6c-6c66-8002-0856d55e1dc7', $5 = '{"v": 4, "id": "1f1a3e72-aa79-6e02-8003-b923e10e81bb", "ts": "2026-08-29T20:21:07.359686+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 3, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 5], "messages": ...'
+2026-08-30 01:51:07.361 IST [99912] LOG:  statement: COMMIT
+2026-08-30 01:51:07.389 IST [99914] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:07.389 IST [99914] DETAIL:  parameters: $1 = 'half-b-nopipe'
+2026-08-30 01:51:08.508 IST [99919] LOG:  execute <unnamed>: update proof_fence set fence = fence + 1, owner = $1
+	 where thread_id = $2 and fence = $3 returning fence
+2026-08-30 01:51:08.508 IST [99919] DETAIL:  parameters: $1 = 'B', $2 = 'half-b-nopipe', $3 = '1'
+2026-08-30 01:51:08.548 IST [99920] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:08.548 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:08.549 IST [99920] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:08.549 IST [99920] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b-nopipe', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:08.549 IST [99920] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:08.549 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-aa6c-6c66-8002-0856d55e1dc7,1f1a3e72-aa5d-60e0-8001-8831ef5e565d,1f1a3e72-aa4e-67ca-8000-7f6dcd27714e,1f1a3e72-aa4d-65dc-bfff-ddd4...', $5 = 'half-b-nopipe', $6 = '', $7 = 'files', $8 = '{1f1a3e72-aa6c-6c66-8002-0856d55e1dc7,1f1a3e72-aa5d-60e0-8001-8831ef5e565d,1f1a3e72-aa4e-67ca-8000-7f6dcd27714e,1f1a3e72-aa4d-65dc-bfff-ddd4...'
+2026-08-30 01:51:08.554 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.555 IST [99920] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.555 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.555 IST [99920] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:08.555 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa79-6e02-8003-b923e10e81bb', $4 = '175c4a49-ef5e-71c9-321b-0d115bd81118', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c8011c0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74af776f726b65722042207475726e2032b1...'
+2026-08-30 01:51:08.555 IST [99920] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:08.555 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-aa79-6e02-8003-b923e10e81bb', $4 = '175c4a49-ef5e-71c9-321b-0d115bd81118', $5 = '', $6 = '1', $7 = '__pregel_tasks', $8 = 'msgpack', $9 = '\xc7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232a4...'
+2026-08-30 01:51:08.555 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.558 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.558 IST [99920] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.558 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.558 IST [99920] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:08.558 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000006.0.7064930117586544', $5 = 'msgpack', $6 = '\x91c7500193af6c616e6767726170682e7479706573a453656e6492a5746f6f6c739184a46e616d65a66c6f6f6b7570a46172677381a36b6579a26b32a26964a574635f4232...'
+2026-08-30 01:51:08.558 IST [99920] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:08.558 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5df-6c60-8004-86fa1a9fbb81', $4 = '1f1a3e72-aa79-6e02-8003-b923e10e81bb', $5 = '{"v": 4, "id": "1f1a3e72-b5df-6c60-8004-86fa1a9fbb81", "ts": "2026-08-29T20:21:08.554389+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 4, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 6], "messages": ...'
+2026-08-30 01:51:08.558 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.561 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.561 IST [99920] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.561 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.561 IST [99920] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:08.561 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5df-6c60-8004-86fa1a9fbb81', $4 = '3f3de5f2-dadb-40a7-f4cb-fa4aa6ba9769', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7e40594bc6c616e67636861696e5f636f72652e6d657373616765732e746f6f6cab546f6f6c4d65737361676589a7636f6e74656e74ab76616c75652d6f662d6b32b161...'
+2026-08-30 01:51:08.561 IST [99920] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:08.561 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5df-6c60-8004-86fa1a9fbb81', $4 = '3f3de5f2-dadb-40a7-f4cb-fa4aa6ba9769', $5 = '', $6 = '1', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:08.561 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.563 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.563 IST [99920] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.563 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.563 IST [99920] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:08.563 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__pregel_tasks', $4 = '00000000000000000000000000000007.0.7523463958847828', $5 = 'msgpack', $6 = '\x90'
+2026-08-30 01:51:08.563 IST [99920] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:08.563 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5ee-6dfa-8005-1db487b73972', $4 = '1f1a3e72-b5df-6c60-8004-86fa1a9fbb81', $5 = '{"v": 4, "id": "1f1a3e72-b5ee-6dfa-8005-1db487b73972", "ts": "2026-08-29T20:21:08.561042+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 5, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 7], "messages": ...'
+2026-08-30 01:51:08.563 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.567 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.567 IST [99920] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.567 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.567 IST [99920] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:08.567 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5ee-6dfa-8005-1db487b73972', $4 = '851381fa-3fd3-51a9-880d-867decdd2c75', $5 = '', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7ee0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74b366696e616c20616e737765722066726f6d...'
+2026-08-30 01:51:08.567 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.569 IST [99920] LOG:  statement: BEGIN
+2026-08-30 01:51:08.569 IST [99920] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.569 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '2'
+2026-08-30 01:51:08.569 IST [99920] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:08.569 IST [99920] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-b5fd-6986-8006-f62d88f88a48', $4 = '1f1a3e72-b5ee-6dfa-8005-1db487b73972', $5 = '{"v": 4, "id": "1f1a3e72-b5fd-6986-8006-f62d88f88a48", "ts": "2026-08-29T20:21:08.567072+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 6, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 8], "messages": ...'
+2026-08-30 01:51:08.569 IST [99920] LOG:  statement: COMMIT
+2026-08-30 01:51:08.842 IST [99922] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:08.842 IST [99922] DETAIL:  parameters: $1 = 'half-b-nopipe'
+2026-08-30 01:51:08.844 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:08.844 IST [99912] LOG:  execute _pg3_2: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.844 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:08.844 IST [99912] ERROR:  division by zero
+2026-08-30 01:51:08.844 IST [99912] STATEMENT:  select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.844 IST [99912] LOG:  statement: ROLLBACK
+2026-08-30 01:51:08.844 IST [99912] LOG:  statement: DEALLOCATE ALL
+2026-08-30 01:51:08.846 IST [99912] LOG:  statement: BEGIN
+2026-08-30 01:51:08.846 IST [99912] LOG:  execute <unnamed>: select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.846 IST [99912] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '1'
+2026-08-30 01:51:08.846 IST [99912] ERROR:  division by zero
+2026-08-30 01:51:08.846 IST [99912] STATEMENT:  select 1 / (select count(*)::int from proof_fence where thread_id = $1 and fence = $2)
+2026-08-30 01:51:08.846 IST [99912] LOG:  statement: ROLLBACK
+2026-08-30 01:51:09.047 IST [99924] LOG:  execute <unnamed>: select checkpoint_id id, parent_checkpoint_id parent, metadata->>'step' step from checkpoints where thread_id=$1 and checkpoint_ns='' order by checkpoint_id
+2026-08-30 01:51:09.047 IST [99924] DETAIL:  parameters: $1 = 'half-b-nopipe'
+2026-08-30 01:51:09.049 IST [99925] LOG:  execute <unnamed>: select fence from proof_fence where thread_id=$1
+2026-08-30 01:51:09.049 IST [99925] DETAIL:  parameters: $1 = 'half-b-nopipe'
+2026-08-30 01:51:09.060 IST [99926] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:09.060 IST [99926] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:09.061 IST [99926] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:09.061 IST [99926] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b-nopipe', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:09.061 IST [99926] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:09.061 IST [99926] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...', $5 = 'half-b-nopipe', $6 = '', $7 = 'files', $8 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...'
+2026-08-30 01:51:09.073 IST [99927] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:09.073 IST [99927] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:09.073 IST [99927] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:09.073 IST [99927] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b-nopipe', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:09.074 IST [99927] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:09.074 IST [99927] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...', $5 = 'half-b-nopipe', $6 = '', $7 = 'files', $8 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...'
+2026-08-30 01:51:09.084 IST [99928] LOG:  execute <unnamed>: 
+	select
+	    thread_id,
+	    checkpoint,
+	    checkpoint_ns,
+	    checkpoint_id,
+	    parent_checkpoint_id,
+	    metadata,
+	    (
+	        select array_agg(array[bl.channel::bytea, bl.type::bytea, bl.blob])
+	        from jsonb_each_text(checkpoint -> 'channel_versions')
+	        inner join checkpoint_blobs bl
+	            on bl.thread_id = checkpoints.thread_id
+	            and bl.checkpoint_ns = checkpoints.checkpoint_ns
+	            and bl.channel = jsonb_each_text.key
+	            and bl.version = jsonb_each_text.value
+	    ) as channel_values,
+	    (
+	        select
+	        array_agg(array[cw.task_id::text::bytea, cw.channel::bytea, cw.type::bytea, cw.blob] order by cw.task_id, cw.idx)
+	        from checkpoint_writes cw
+	        where cw.thread_id = checkpoints.thread_id
+	            and cw.checkpoint_ns = checkpoints.checkpoint_ns
+	            and cw.checkpoint_id = checkpoints.checkpoint_id
+	    ) as pending_writes
+	from checkpoints WHERE thread_id = $1 AND checkpoint_ns = $2 ORDER BY checkpoint_id DESC LIMIT 1
+2026-08-30 01:51:09.084 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = ''
+2026-08-30 01:51:09.085 IST [99928] LOG:  execute <unnamed>: SELECT checkpoint_id, parent_checkpoint_id, checkpoint -> 'channel_versions' ->> $1 AS ver_0, EXISTS (SELECT 1 FROM checkpoint_blobs b0 WHERE b0.thread_id = checkpoints.thread_id AND b0.checkpoint_ns = checkpoints.checkpoint_ns AND b0.channel = $2 AND b0.version = checkpoint -> 'channel_versions' ->> $3 AND b0.type <> 'empty') AS hb_0, checkpoint -> 'channel_values' -> $4 AS inline_0, checkpoint -> 'channel_versions' ->> $5 AS ver_1, EXISTS (SELECT 1 FROM checkpoint_blobs b1 WHERE b1.thread_id = checkpoints.thread_id AND b1.checkpoint_ns = checkpoints.checkpoint_ns AND b1.channel = $6 AND b1.version = checkpoint -> 'channel_versions' ->> $7 AND b1.type <> 'empty') AS hb_1, checkpoint -> 'channel_values' -> $8 AS inline_1 FROM checkpoints WHERE thread_id = $9 AND checkpoint_ns = $10 AND ($11::text IS NULL OR checkpoint_id < $12) ORDER BY checkpoint_id DESC LIMIT $13
+2026-08-30 01:51:09.085 IST [99928] DETAIL:  parameters: $1 = 'messages', $2 = 'messages', $3 = 'messages', $4 = 'messages', $5 = 'files', $6 = 'files', $7 = 'files', $8 = 'files', $9 = 'half-b-nopipe', $10 = '', $11 = NULL, $12 = NULL, $13 = '1024'
+2026-08-30 01:51:09.085 IST [99928] LOG:  execute <unnamed>: SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $1 AND checkpoint_ns = $2 AND channel = $3 AND checkpoint_id = ANY($4) UNION ALL SELECT 'w'::text AS _kind, checkpoint_id, channel, type, blob, task_id, idx, NULL::text AS version FROM checkpoint_writes WHERE thread_id = $5 AND checkpoint_ns = $6 AND channel = $7 AND checkpoint_id = ANY($8)
+2026-08-30 01:51:09.085 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = 'messages', $4 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...', $5 = 'half-b-nopipe', $6 = '', $7 = 'files', $8 = '{1f1a3e72-b5ee-6dfa-8005-1db487b73972,1f1a3e72-b5df-6c60-8004-86fa1a9fbb81,1f1a3e72-aa79-6e02-8003-b923e10e81bb,1f1a3e72-aa6c-6c66-8002-0856...'
+2026-08-30 01:51:09.085 IST [99928] LOG:  execute _pg3_0: 
+	    INSERT INTO checkpoint_blobs (thread_id, checkpoint_ns, channel, version, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, channel, version) DO NOTHING
+	
+2026-08-30 01:51:09.085 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '__start__', $4 = '00000000000000000000000000000009.0.8304337077560169', $5 = 'msgpack', $6 = '\x81a86d6573736167657391c78d0594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a863...'
+2026-08-30 01:51:09.085 IST [99928] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:09.085 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baef-6278-8007-708edf483432', $4 = '1f1a3e72-b5fd-6986-8006-f62d88f88a48', $5 = '{"v": 4, "id": "1f1a3e72-baef-6278-8007-708edf483432", "ts": "2026-08-29T20:21:09.085433+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 7, "source": "input", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 9], "messages":...'
+2026-08-30 01:51:09.086 IST [99928] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:09.086 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baef-6278-8007-708edf483432', $4 = '344bf2a0-dfcd-d53d-961c-f36346491d81', $5 = '~__pregel_pull, __start__', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7b20594bd6c616e67636861696e5f636f72652e6d657373616765732e68756d616eac48756d616e4d65737361676586a7636f6e74656e74a8636f6e74696e7565b16164...'
+2026-08-30 01:51:09.086 IST [99928] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:09.086 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baef-6278-8007-708edf483432', $4 = '344bf2a0-dfcd-d53d-961c-f36346491d81', $5 = '~__pregel_pull, __start__', $6 = '1', $7 = 'branch:to:PatchToolCallsMiddleware.before_agent', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:09.086 IST [99928] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:09.086 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baf0-66dc-8008-b67c65a1775e', $4 = '1f1a3e72-baef-6278-8007-708edf483432', $5 = '{"v": 4, "id": "1f1a3e72-baf0-66dc-8008-b67c65a1775e", "ts": "2026-08-29T20:21:09.085969+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 8, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 10], "messages":...'
+2026-08-30 01:51:09.087 IST [99928] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:09.087 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baf0-66dc-8008-b67c65a1775e', $4 = '549cc395-573c-6b42-e8e4-d2187974df6a', $5 = '~__pregel_pull, PatchToolCallsMiddleware.before_agent', $6 = '0', $7 = 'branch:to:model', $8 = 'null', $9 = '\x'
+2026-08-30 01:51:09.087 IST [99928] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:09.087 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baf3-6224-8009-2791576b2f87', $4 = '1f1a3e72-baf0-66dc-8008-b67c65a1775e', $5 = '{"v": 4, "id": "1f1a3e72-baf3-6224-8009-2791576b2f87", "ts": "2026-08-29T20:21:09.087077+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 9, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 11], "messages":...'
+2026-08-30 01:51:09.091 IST [99928] LOG:  execute _pg3_1: 
+	    INSERT INTO checkpoint_writes (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path, idx, channel, type, blob)
+	    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id, task_id, idx) DO NOTHING
+	
+2026-08-30 01:51:09.091 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-baf3-6224-8009-2791576b2f87', $4 = '7ae1e93f-1fa1-b4bf-7cec-8acf42cbc443', $5 = '~__pregel_pull, model', $6 = '0', $7 = 'messages', $8 = 'msgpack', $9 = '\x91c7df0594ba6c616e67636861696e5f636f72652e6d657373616765732e6169a941494d65737361676589a7636f6e74656e74a4646f6e65b16164646974696f6e616c5f6b...'
+2026-08-30 01:51:09.091 IST [99928] LOG:  execute <unnamed>: 
+	    INSERT INTO checkpoints (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, checkpoint, metadata)
+	    VALUES ($1, $2, $3, $4, $5, $6)
+	    ON CONFLICT (thread_id, checkpoint_ns, checkpoint_id)
+	    DO UPDATE SET
+	        checkpoint = EXCLUDED.checkpoint,
+	        metadata = EXCLUDED.metadata;
+	
+2026-08-30 01:51:09.091 IST [99928] DETAIL:  parameters: $1 = 'half-b-nopipe', $2 = '', $3 = '1f1a3e72-bafe-6246-800a-5369b97de385', $4 = '1f1a3e72-baf3-6224-8009-2791576b2f87', $5 = '{"v": 4, "id": "1f1a3e72-bafe-6246-800a-5369b97de385", "ts": "2026-08-29T20:21:09.091585+00:00", "versions_seen": {"model": {"branch:to:mode...', $6 = '{"step": 10, "source": "loop", "parents": {}, "ls_integration": "deepagents", "counters_since_delta_snapshot": {"files": [0, 12], "messages"...'

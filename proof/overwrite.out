@@ -1,0 +1,167 @@
+THE OVERWRITE PROOF -- the other ON CONFLICT clause, end to end
+started 2026-08-30 10:17:32   python 3.12.13
+pinned: langgraph==1.2.11  langgraph-checkpoint==4.2.0  langgraph-checkpoint-postgres==3.1.2  langchain-core==1.6.1  psycopg==3.3.4
+postgres: 16.2   pipeline support: True
+companion to proof.py: that one shows the DROP, this one the OVERWRITE
+
+==============================================================================
+PART 1 -- HAND-DRIVEN SQL: which clause replaces, which one drops
+==============================================================================
+  READ IN SOURCE  langgraph/checkpoint/postgres/__init__.py:363-367
+    query = (self.UPSERT_CHECKPOINT_WRITES_SQL       # DO UPDATE
+             if all(w[0] in WRITES_IDX_MAP for w in writes)
+             else self.INSERT_CHECKPOINT_WRITES_SQL) # DO NOTHING
+  READ IN SOURCE  langgraph/checkpoint/base/__init__.py:795
+    WRITES_IDX_MAP = {'__error__': -1, '__scheduled__': -2, '__interrupt__': -3, '__resume__': -4}
+  READ IN SOURCE  postgres/base.py:146-159 -- both statements conflict on
+    (thread_id, checkpoint_ns, checkpoint_id, task_id, idx); DO UPDATE SET
+    lists channel, type, blob -- and NOT task_path.
+
+  HAND-DRIVEN SQL  two writers, one conflict key, both real statements:
+    INSERT .. ON CONFLICT DO NOTHING -> rows=1  blob='SURVIVOR'  task_path='path-of-survivor'
+    UPSERT .. ON CONFLICT DO UPDATE  -> rows=1  blob='ZOMBIE'  task_path='path-of-survivor'
+  [PASS] at one conflict key DO NOTHING keeps the FIRST writer's blob and DO UPDATE keeps the SECOND's  -- so the loser of a DO UPDATE collision is the live worker, not the stale one
+    note: task_path is not in the SET list, so after a DO UPDATE the row carries
+          the SECOND writer's blob under the FIRST writer's task_path. Since idx is
+          derived from the channel for special writes, the reachable effect of the SET
+          list is blob+type replacement at a fixed (channel, idx) -- not a channel swap.
+
+  HAND-DRIVEN SQL  the same collision through the real put_writes() API,
+  two savers on two connections, so the branch is chosen by langgraph:
+    ALL channels special  [('__resume__', v)]  -> idx=[-4] __resume__='ZOMBIE'
+    MIXED  [('__resume__', v), ('log', [v])]   -> idx=[-4, 1] __resume__='SURVIVOR'
+  [PASS] put_writes ITSELF routes a pure-special batch to DO UPDATE (second writer wins) and a mixed batch to DO NOTHING (first writer wins)  -- the branch selection is measured, not inferred from reading the source
+
+  HAND-DRIVEN SQL  the idx a channel lands on (the conflict key's last column):
+    t-ordinary   idx=0   log
+    t-ordinary   idx=1   other
+    t-special    idx=-4  __resume__
+    t-special    idx=-3  __interrupt__
+    t-special    idx=-2  __scheduled__
+    t-special    idx=-1  __error__
+  [PASS] each special channel lands on its OWN fixed negative idx, so two workers writing the same control channel at one checkpoint always collide  -- {'__resume__': -4, '__interrupt__': -3, '__scheduled__': -2, '__error__': -1}
+
+==============================================================================
+PART 1b -- REAL GRAPH RUN: which batches actually take the DO UPDATE path
+==============================================================================
+  one worker, one thread: start -> interrupt -> resume -> interrupt -> resume -> done
+  every put_writes batch it issued:
+    cp ...d856abe2  06a207e3     ['log', 'branch:to:approve']                   -> INSERT/DO NOTHING
+    cp ...f10c7c0f  f7fe1f19     ['__interrupt__']                              -> UPSERT/DO UPDATE
+    cp ...f10c7c0f  NULL_TASK_ID ['__resume__']                                 -> UPSERT/DO UPDATE
+    cp ...f10c7c0f  f7fe1f19     ['__interrupt__', '__resume__']                -> UPSERT/DO UPDATE
+    cp ...f10c7c0f  NULL_TASK_ID ['__resume__']                                 -> UPSERT/DO UPDATE
+    cp ...f10c7c0f  f7fe1f19     ['__resume__', '__resume__', 'log']            -> INSERT/DO NOTHING
+  [PASS] a real graph run DOES route batches to the DO UPDATE statement  -- 4 of 6 batches: ['__interrupt__']; ['__resume__']; ['__interrupt__', '__resume__']; ['__resume__']
+  final state: log=['start', 'R1|R2']
+  READ IN SOURCE, matching the three shapes above:
+    pregel/_loop.py:919-926  Command(resume=v) -> put_writes(NULL_TASK_ID, [(RESUME, v)])
+    pregel/_runner.py:585-591  GraphInterrupt -> put_writes(task_id, [(INTERRUPT, ..)] + RESUME)
+    pregel/_runner.py:596-604  an unhandled node error with no prior channel write
+      -> put_writes(task_id, [(ERROR, exc)]) -- also all-special, also DO UPDATE (not exercised here)
+
+==============================================================================
+PART 2 -- REAL GRAPH RUN, TWO OS PROCESSES, FENCING OFF
+==============================================================================
+  stage 0  a run reached interrupt() and paused. 2 checkpoints, tip ...01a57682 step 0
+    control rows at the tip:
+      task eb0951d3  idx=-3  __interrupt__  value=[Interrupt(value='approve step 1?', id='4bf372741c1c07f53897
+  stage 1  worker A (pid 54110) resumed with 'A-VALUE', loaded ...01a57682, and is SIGSTOP'd
+           holding an unissued __resume__ write for it (ps state='T'; T = stopped)
+  stage 2  worker B resumed the SAME thread with 'B-VALUE': ok=True fence=None interrupts=['approve step 2?']
+    control rows at the tip after B:
+      NULL_TASK_ID   idx=-4  __resume__     value=B-VALUE
+      task eb0951d3  idx=-4  __resume__     value=['B-VALUE']
+      task eb0951d3  idx=-3  __interrupt__  value=[Interrupt(value='approve step 2?', id='4bf372741c1c07f53897
+  [PASS] the survivor's human input is the durable control data at that checkpoint  -- NULL/__resume__='B-VALUE'  task/__resume__=['B-VALUE']
+  stage 3  worker A SIGCONT'd and allowed to write: ok=True error=None sqlstate=None interrupts=['approve step 2?']
+    control rows at the tip after the zombie wrote:
+      NULL_TASK_ID   idx=-4  __resume__     value=A-VALUE
+      task eb0951d3  idx=-4  __resume__     value=['A-VALUE']
+      task eb0951d3  idx=-3  __interrupt__  value=[Interrupt(value='approve step 2?', id='4bf372741c1c07f53897
+  [PASS] THE OVERWRITE: the stale worker's __resume__ REPLACED the survivor's. Control data, not transcript  -- NULL/__resume__ B-VALUE -> 'A-VALUE'; task/__resume__ ['B-VALUE'] -> ['A-VALUE']
+  [PASS] it REPLACED rather than added: same conflict key, same row count  -- 3 rows before, 3 after
+  [PASS] both workers believe they succeeded; neither raised, neither logged
+  [PASS] no fork, no checkpoint added: this damage is NOT the dropped-write mechanism proof.py shows  -- 2 checkpoints at stage 0, 2 after B, 2 after A; forks=0
+  stage 4  a LATER worker resumes the second interrupt with 'SECOND'.
+           Identical in both halves -- unfenced, no checkpoint_id pinned, writes nothing first.
+           the run COMPLETED. final log = ['start', 'A-VALUE|SECOND']
+  [PASS] the surviving run finished on a human input NEVER GIVEN TO IT: the frozen worker's 'A-VALUE', not the live worker's 'B-VALUE'  -- log=['start', 'A-VALUE|SECOND']
+
+==============================================================================
+PART 2b -- REAL GRAPH RUN, NO INSTRUMENTATION: the collision without a gate
+==============================================================================
+  Part 2's gate only decides WHICH worker writes last. Here: two processes
+  spawned together (alternating which goes first), no gate, no SIGSTOP, no
+  fence -- so the winner is decided by scheduling alone. The tally below
+  varies from run to run and is therefore reported, not asserted; the one
+  thing that is not a matter of timing IS asserted -- that the two
+  processes contend for ONE row rather than storing one each.
+    trial 0  spawned A then B  rows at (NULL_TASK_ID,-4)=1  kept=['A-VALUE']
+             A:+0.000->+0.019s/log=['start']  B:+0.000->+0.019s/log=['start']
+             then a later worker resumed with 'SECOND' -> ['start', 'A-VALUE|SECOND']
+    trial 1  spawned B then A  rows at (NULL_TASK_ID,-4)=1  kept=['A-VALUE']
+             A:+0.000->+0.018s/log=['start']  B:+0.000->+0.018s/log=['start']
+             then a later worker resumed with 'SECOND' -> ['start', 'A-VALUE|SECOND']
+    trial 2  spawned A then B  rows at (NULL_TASK_ID,-4)=1  kept=['A-VALUE']
+             A:+0.000->+0.014s/log=['start']  B:+0.000->+0.014s/log=['start']
+             then a later worker resumed with 'SECOND' -> ['start', 'A-VALUE|SECOND']
+    trial 3  spawned B then A  rows at (NULL_TASK_ID,-4)=1  kept=['A-VALUE']
+             A:+0.000->+0.012s/log=['start']  B:+0.000->+0.012s/log=['start']
+             then a later worker resumed with 'SECOND' -> ['start', 'A-VALUE|SECOND']
+    trial 4  spawned A then B  rows at (NULL_TASK_ID,-4)=1  kept=['A-VALUE']
+             A:+0.000->+0.010s/log=['start']  B:+0.000->+0.010s/log=['start']
+             then a later worker resumed with 'SECOND' -> ['start', 'A-VALUE|SECOND']
+  which worker's value the thread kept, over 5 trials: {"['A-VALUE']": 5}
+  [PASS] two unsynchronised processes always contend for ONE row at the shared conflict key -- they never store one each  -- so the collision needs no instrumentation; the gate in Part 2 only makes the winner deterministic
+
+==============================================================================
+PART 3 -- REAL GRAPH RUN, TWO OS PROCESSES, FENCING ON
+==============================================================================
+  stage 0  a run reached interrupt() and paused. 2 checkpoints, tip ...22fddd52 step 0
+    control rows at the tip:
+      task 7c0660a1  idx=-3  __interrupt__  value=[Interrupt(value='approve step 1?', id='31feb65ef5d14e891787
+  stage 1  worker A (pid 54217) resumed with 'A-VALUE', loaded ...22fddd52, and is SIGSTOP'd
+           holding an unissued __resume__ write for it (ps state='T'; T = stopped)
+  stage 2  worker B resumed the SAME thread with 'B-VALUE': ok=True fence=2 interrupts=['approve step 2?']
+    control rows at the tip after B:
+      NULL_TASK_ID   idx=-4  __resume__     value=B-VALUE
+      task 7c0660a1  idx=-4  __resume__     value=['B-VALUE']
+      task 7c0660a1  idx=-3  __interrupt__  value=[Interrupt(value='approve step 2?', id='31feb65ef5d14e891787
+  [PASS] the survivor's human input is the durable control data at that checkpoint  -- NULL/__resume__='B-VALUE'  task/__resume__=['B-VALUE']
+  stage 3  worker A SIGCONT'd and allowed to write: ok=False error=DivisionByZero: division by zero sqlstate=22012 interrupts=None
+    [A stderr] error ignored terminating <psycopg.Pipeline [IDLE, pipeline=ON] (user=postgres database=durable_agents_overwrite) at 0x109b680b0>: pipeline aborted
+    control rows at the tip after the zombie wrote:
+      NULL_TASK_ID   idx=-4  __resume__     value=B-VALUE
+      task 7c0660a1  idx=-4  __resume__     value=['B-VALUE']
+      task 7c0660a1  idx=-3  __interrupt__  value=[Interrupt(value='approve step 2?', id='31feb65ef5d14e891787
+  [PASS] worker B's claim is a compare-and-set: 1 -> 2 in one statement, and a later claim expecting 1 gets nothing  -- B claimed 2; stale re-claim -> None
+  [PASS] worker A's run terminated instead of writing  -- DivisionByZero: division by zero
+  [PASS] the refusal came from POSTGRES, not a Python raise -- LOAD-BEARING: a client-side raise inside a pipeline commits the queued write anyway  -- sqlstate=22012
+  [PASS] the fence PREVENTS the overwrite: the survivor's control data is untouched, on the DO UPDATE statement as well as DO NOTHING  -- NULL/__resume__='B-VALUE'  task/__resume__=['B-VALUE']
+  [PASS] the fence row advanced exactly once
+  [PASS] no fork, no checkpoint added: this damage is NOT the dropped-write mechanism proof.py shows  -- 2 checkpoints at stage 0, 2 after B, 2 after A; forks=0
+  stage 4  a LATER worker resumes the second interrupt with 'SECOND'.
+           Identical in both halves -- unfenced, no checkpoint_id pinned, writes nothing first.
+           the run COMPLETED. final log = ['start', 'B-VALUE|SECOND']
+  [PASS] fenced, the run finishes on the input that was actually supplied to the live worker  -- log=['start', 'B-VALUE|SECOND']
+
+==============================================================================
+VERDICT: PROVEN
+  SQL      a write whose channels are ALL in WRITES_IDX_MAP takes
+           UPSERT .. ON CONFLICT DO UPDATE, so the SECOND writer at a
+           conflict key wins; an ordinary or mixed write at the same key
+           takes DO NOTHING and the second writer is dropped. Measured
+           through put_writes() itself, not inferred from the source.
+  OFF      two OS processes on one thread_id: the SIGSTOP'd worker's
+           __resume__ write REPLACED the live worker's, at the same
+           checkpoint, with no fork and no added checkpoint -- so this is
+           a different mechanism from the dropped write in proof.py. A
+           later worker then resumed the run and finished it on a human
+           input that was never given to it. All three workers exit 0.
+  ON       proof/fence.py already blocks it: the guard sits at
+           _cursor(pipeline=True), upstream of the statement choice, so
+           the zombie is refused by Postgres (SQLSTATE 22012) on the DO
+           UPDATE path exactly as on DO NOTHING, and the later worker
+           finishes on the input actually supplied.
+==============================================================================

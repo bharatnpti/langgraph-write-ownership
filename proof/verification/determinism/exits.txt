@@ -1,0 +1,6 @@
+run02 EXIT=0
+run03 EXIT=0
+run04 EXIT=0
+run05 EXIT=0
+run06 EXIT=0
+ALLDONE

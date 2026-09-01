@@ -1,0 +1,161 @@
+THE ZOMBIE PROOF -- durable-agents Phase 1
+started 2026-08-30 02:23:50   python 3.12.13
+pinned: langgraph==1.2.11  langgraph-checkpoint==4.2.0  langgraph-checkpoint-postgres==3.1.2  deepagents==0.7.11  langchain-core==1.6.1  psycopg==3.3.4
+postgres: 16.2   pipeline support: True
+scenario: 1 thread, 2 OS processes, deepagents react loop, durability='sync'
+
+pre-flight -- the guard's SQL, and two shapes that look right and are not
+    CASE WHEN <sub>=1 THEN 1 ELSE 1/0 END, fence MATCHES      -> DivisionByZero sqlstate=22012
+    CASE WHEN true THEN 1 ELSE 1/0 END (constant condition)   -> 1
+    1 / (select count(*)...), fence MATCHES                   -> 1
+    1 / (select count(*)...), fence STALE                     -> DivisionByZero sqlstate=22012
+  [PASS] the guard SQL returns 1 when the fence matches and raises 22012 when stale
+
+  and the conflict clause put_writes picks (measured, not asserted):
+    WRITES_IDX_MAP = ['__error__', '__interrupt__', '__resume__', '__scheduled__']
+    INSERT .. DO NOTHING   <- any channel outside that map ('messages')
+      two writers, same conflict key -> survivor is 'survivor'
+    UPSERT .. DO UPDATE    <- only if ALL channels are in that map
+      two writers, same conflict key -> survivor is 'zombie'
+    so a zombie's __interrupt__/__resume__/__error__ write OVERWRITES the
+    survivor's instead of being dropped. Mechanism measured above; the
+    end-to-end scenario is untested -- see README 'What this does not prove'.
+
+==============================================================================
+HALF A -- NEGATIVE CONTROL, FENCING OFF (the deliverable)
+==============================================================================
+  worker A (pid 17019) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...d96bc0a3
+  worker B took the thread over with invoke(None, config): ok=True fence=None
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=True error=None
+
+  Assertion 1 -- TIER 1, general to LangGraph + PostgresSaver and in no way
+  specific to deepagents: the checkpoint chain FORKS and one worker's work is lost
+  [PASS] two distinct checkpoints share one parent_checkpoint_id  -- parent ...d96bc0a3 -> children ...0061aedd, ...5001e683
+  [PASS] one child written by worker B, one by the thawed zombie A  -- B ...0061aedd / A ...5001e683
+  [PASS] BOTH workers believe they succeeded; neither saw an error
+  [PASS] worker B's committed work -- its terminal checkpoint included -- is no longer reachable from the tip  -- 3 of B's 8 checkpoints orphaned; B's terminal checkpoint ...abc6f1bb is one of them
+
+  Assertion 2 -- TIER 2, specific to deepagents' DeltaChannel transcript:
+  the surviving branch's message list is MALFORMED, not merely superseded
+    both workers ran the SAME model task at the fork parent and both wrote messages there;
+    rows actually stored: 1  task_ids=['40542850']  tool_calls=['tc_B2']
+    every tool_use id stored ANYWHERE in the thread (writes + blobs): ['tc_A1', 'tc_B2']
+    every tool_result id stored anywhere:          ['tc_A1', 'tc_A2', 'tc_B2']
+  [PASS] the zombie's AIMessage was not superseded, it was ANNIHILATED: nothing in the thread offers tc_A2, yet a tool_result answering it is durable  -- one messages row survives at the fork parent (B's, offering tc_B2); the AIMessage offering tc_A2 is in no write row and no blob, while A's ToolMessage for tc_A2 sits on A's branch -- reachable only if A ran the same task at the same checkpoint and its put_writes was dropped
+    thread as read back from the tip:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_A2
+    AIMessage      final answer from A          tool_calls=- tool_call_id=-
+  [PASS] the list read back from the tip contains a tool_result whose tool_use is nowhere in it  -- tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+         + also, but NOT what the assertion above tests: tool_use id='tc_B2' was never answered by a tool_result
+    worker B returned to its caller: 'final answer from B'
+    the thread's tip now says:       'final answer from A'
+    A plain StateGraph on MessagesState forks the chain identically but
+    leaves each branch internally consistent -- see README 'Two tiers'.
+
+  Assertion 3 -- is it unresumable? (measured and reported, NOT asserted)
+    .next at the tip = ()  (LangGraph thinks the run finished)
+    the probes below MUTATE the thread; they run after every check() above
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> RuntimeError: provider would reject this request: tool_result tool_call_id='tc_A2' has no matching tool_use anywhere before it in this message list
+    Plainly: NOT mechanically unresumable -- LangGraph reads, replays and
+    resumes the forked thread without complaint. What is destroyed is the
+    thread's USABILITY at the next model call, durably. Shown with our own
+    validator, not a real provider's 400 (no API key here).
+
+  Assertion 4 -- the independent witness: deepagents' OWN repair middleware (measured, NOT asserted)
+    the thread after that next-turn probe:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    Tool call lookup with id t   tool_calls=- tool_call_id=tc_B2
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_A2
+    AIMessage      final answer from A          tool_calls=- tool_call_id=-
+    HumanMessage   continue                     tool_calls=- tool_call_id=-
+    PatchToolCallsMiddleware.before_agent fired, rewrote the list with RemoveMessage(REMOVE_ALL_MESSAGES)
+    and injected a synthetic ToolMessage for the dangling tc_B2: True
+    that repair is committed to the thread, and the orphaned tool_result SURVIVED it: True
+    So the framework itself classifies half the damage as needing repair,
+    fixes that half, and cannot fix the other half.
+
+==============================================================================
+HALF B -- FENCING ON  (pipeline path)
+==============================================================================
+  worker A (pid 17067) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...fba13e4f
+  worker B took the thread over with invoke(None, config): ok=True fence=2
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=False error=DivisionByZero: division by zero
+    [A stderr] error ignored terminating <psycopg.Pipeline [IDLE, pipeline=ON] (user=postgres database=durable_agents_proof) at 0x10fa1dfa0>: pipeline aborted
+  [PASS] worker B's claim is a compare-and-set: it advanced the fence 1 -> 2, and a later claim expecting 1 gets nothing  -- B claimed 2; the stale re-claim returned None
+  [PASS] the chain did NOT fork  -- 0 forked parents
+  [PASS] the thawed zombie's writes were refused by the DATABASE  -- 0 checkpoint rows added after the takeover
+  [PASS] worker A's run terminated instead of committing  -- DivisionByZero: division by zero
+  [PASS] the refusal came from POSTGRES, not from a Python raise -- LOAD-BEARING, see README: the only assertion here a client-side fence fails  -- sqlstate=22012 error=DivisionByZero: division by zero
+  [PASS] the fence row advanced exactly once
+  worker B's thread, read back:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_B2
+    AIMessage      final answer from B          tool_calls=- tool_call_id=-
+  [PASS] worker B's result is intact and well-formed  -- 6 messages, shape as expected, orphans: none
+  [PASS] the tip is worker B's answer  -- 'final answer from B'
+  still resumable (these probes MUTATE the thread; they run last):
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> ACCEPTED, 8 messages
+  [PASS] the thread accepts a next turn: a fresh model call on the surviving list is not rejected  -- invoke(None)=True next-turn=True
+
+==============================================================================
+HALF B -- FENCING ON  (supports_pipeline forced False)
+==============================================================================
+  worker A (pid 17105) SIGSTOP'd inside its 2nd model call -- frozen, not killed (ps state='T'; T = stopped)
+  chain at freeze: 5 checkpoints, tip step 3 id ...b540a14c
+  worker B took the thread over with invoke(None, config): ok=True fence=2
+  worker A SIGCONT'd -- the zombie thaws and writes
+  worker A finished: ok=False error=DivisionByZero: division by zero
+  [PASS] worker B's claim is a compare-and-set: it advanced the fence 1 -> 2, and a later claim expecting 1 gets nothing  -- B claimed 2; the stale re-claim returned None
+  [PASS] the chain did NOT fork  -- 0 forked parents
+  [PASS] the thawed zombie's writes were refused by the DATABASE  -- 0 checkpoint rows added after the takeover
+  [PASS] worker A's run terminated instead of committing  -- DivisionByZero: division by zero
+  [PASS] the refusal came from POSTGRES, not from a Python raise -- LOAD-BEARING, see README: the only assertion here a client-side fence fails  -- sqlstate=22012 error=DivisionByZero: division by zero
+  [PASS] the fence row advanced exactly once
+  worker B's thread, read back:
+    HumanMessage   go                           tool_calls=- tool_call_id=-
+    AIMessage      looking up k1                tool_calls=['tc_A1'] tool_call_id=-
+    ToolMessage    value-of-k1                  tool_calls=- tool_call_id=tc_A1
+    AIMessage      worker B turn 2              tool_calls=['tc_B2'] tool_call_id=-
+    ToolMessage    value-of-k2                  tool_calls=- tool_call_id=tc_B2
+    AIMessage      final answer from B          tool_calls=- tool_call_id=-
+  [PASS] worker B's result is intact and well-formed  -- 6 messages, shape as expected, orphans: none
+  [PASS] the tip is worker B's answer  -- 'final answer from B'
+  still resumable (these probes MUTATE the thread; they run last):
+    invoke(None, config) -> ACCEPTED, 6 messages (no model call: nothing pending)
+    next user turn       -> ACCEPTED, 8 messages
+  [PASS] the thread accepts a next turn: a fresh model call on the surviving list is not rejected  -- invoke(None)=True next-turn=True
+
+==============================================================================
+VERDICT: PROVEN, in two tiers
+  OFF, TIER 1 -- general to LangGraph + PostgresSaver, nothing to do with
+       deepagents: two workers on one thread_id fork the checkpoint chain;
+       the loser's put_writes is silently discarded while it reports
+       success; its committed work, terminal checkpoint included, is
+       unreachable from the tip; the answer it returned to its caller
+       contradicts the thread. Both workers exit 0. Nothing warns.
+  OFF, TIER 2 -- specific to deepagents' DeltaChannel transcript: the
+       surviving branch's message list is MALFORMED -- a tool_result whose
+       tool_use was silently discarded and is stored NOWHERE, alongside a
+       tool_use whose result is on the abandoned branch. A plain
+       MessagesState graph forks identically but leaves each branch
+       internally consistent, because its full list lives in its own blob.
+  ON:  the same zombie's writes were refused by Postgres, the chain did not
+       fork, and the survivor's thread is intact and usable -- on both the
+       pipeline path and the supports_pipeline=False fallback.
+==============================================================================
