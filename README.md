@@ -67,7 +67,10 @@ Three new files plus 21 lines of registration across four existing ones. Two pat
 to apply cleanly — one against `main`, one against the sdist published to PyPI as 0.0.2 — plus an
 idempotent `apply.py` so it survives a rebase.
 
+`verdict.py` needs the upstream suite, which is one more package than the reproduction requires:
+
 ```bash
+VIRTUAL_ENV=$PWD/spike/.venv uv pip install langgraph-checkpoint-conformance pytest
 spike/.venv/bin/python upstream/checkpoint-conformance-write-ownership/verdict.py
 ```
 

@@ -46,6 +46,6 @@ WRITE_OWNERSHIP -- 15 clauses
   HALF 2 -- against a real PostgreSQL 16.2.
 ==============================================================================
 
-  SKIPPED: no pgserver, or spike/pgdata does not exist
+  SKIPPED: durable_agents is not importable (No module named 'durable_agents')
 
 done.
