@@ -1,10 +1,11 @@
 # WRITE_OWNERSHIP — an extended capability for `langgraph-checkpoint-conformance`
 
-**Status: written, tested, and not sent.** Nothing here has been posted, filed, or pushed
-anywhere. No fork exists, no issue is open, no account was created. This directory is a
-finished artifact waiting on a human to decide whether and how to offer it — see
-the parent project's strategy document Track A for the sequence that gating
-follows (forum → issue → get assigned → only then a PR).
+**Status: offered upstream on 2026-09-01, and correctly not yet a PR.** The proposal is
+[live on the LangChain forum](https://forum.langchain.com/t/a-checkpointer-that-accepts-two-concurrent-writers-still-scores-conformance-level-full/4460),
+with 0 replies so far. **No fork exists, no issue is open, and no PR has been raised** — that is
+the required order, not an oversight: `require_issue_link.yml` auto-closes external PRs whose
+author is not assigned to a linked issue, so the sequence is forum → issue → get assigned → only
+then a PR. This directory is the finished artifact the post points at.
 
 ---
 
