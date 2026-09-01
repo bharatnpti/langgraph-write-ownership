@@ -1,0 +1,21 @@
+README.md
+  s_620cb66d8b8583::t_55a2a4eb2981a8 70-71,73
+upstream/checkpoint-conformance-write-ownership/verdict.out
+  s_620cb66d8b8583::t_b0cb34e621a531 49
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "81fba99a509d7f0d87ce25c8f302c9f5649ac462",
+  "prompts": {},
+  "sessions": {
+    "s_620cb66d8b8583": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fbcf939d-43bb-4327-8fda-e9932cc9731d",
+        "model": "claude-opus-5"
+      },
+      "human_author": "CICD <cicd@oneai.telekom.de>"
+    }
+  }
+}
