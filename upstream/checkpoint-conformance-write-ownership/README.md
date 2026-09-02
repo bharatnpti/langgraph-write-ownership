@@ -4,10 +4,10 @@
 [live on the LangChain forum](https://forum.langchain.com/t/a-checkpointer-that-accepts-two-concurrent-writers-still-scores-conformance-level-full/4460),
 and was **answered on 2026-09-02** by a "LangChain Expert" who called it a real gap, agreed the
 extended capability is additive because the suite already auto-detects optional capabilities, and
-asked for a GitHub issue.
+asked for a GitHub issue. That issue is now open:
+[langgraph#8796](https://github.com/langchain-ai/langgraph/issues/8796).
 
-**No fork exists, no issue is open, and no PR has been raised** — that is the required order, not an
-oversight. `require_issue_link.yml` auto-closes external PRs whose author is not *assigned* to a
+**No fork exists and no PR has been raised** — that is the required order, not an oversight. `require_issue_link.yml` auto-closes external PRs whose author is not *assigned* to a
 linked issue, and only a maintainer can assign; the forum replier is a community contributor rather
 than a committer. So the sequence is forum → issue → get assigned by a maintainer → only then a PR,
 and it has advanced exactly one step. This directory is the finished artifact the post points at.
